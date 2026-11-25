@@ -143,6 +143,19 @@ public class NovaGenNative {
             return false;
         }
     }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern uint SHEmptyRecycleBin(IntPtr hwnd, string pszRootPath, uint dwFlags);
+
+    public static bool EmptyRecycleBinSilent() {
+        try {
+            // SHERB_NOCONFIRMATION (1) | SHERB_NOPROGRESSUI (2) | SHERB_NOSOUND (4) = 7
+            uint res = SHEmptyRecycleBin(IntPtr.Zero, null, 7);
+            return (res == 0);
+        } catch {
+            return false;
+        }
+    }
 }
 "@
 try {
@@ -1841,8 +1854,8 @@ function Invoke-PCSpeedBoost {
         Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Checking Recycle Bin..." -AccentHex $ringHex
         try {
             if (-not $DryRun) {
-                Clear-RecycleBin -Force -ErrorAction SilentlyContinue
-                Write-BoostLog "Recycle Bin: Cleared all drives." "OK"
+                [NovaGenNative]::EmptyRecycleBinSilent() | Out-Null
+                Write-BoostLog "Recycle Bin: Cleared all drives silently." "OK"
             } else {
                 Write-BoostLog "Recycle Bin: Would empty all drive Recycle Bins. (Dry Run)" "DRY"
             }
@@ -3441,15 +3454,7 @@ $Controls['BtnBoostAnalyze'].Add_Click({
 })
 
 $Controls['BtnBoostNow'].Add_Click({
-    $confirm = [System.Windows.MessageBox]::Show(
-        "This will clean temp files, caches, and other safe junk from your PC.`n`nSafe — never touches OS files or user documents.`n`nProceed with PC Speed Boost?",
-        "NovaGen // PC Speed Boost",
-        [System.Windows.MessageBoxButton]::YesNo,
-        [System.Windows.MessageBoxImage]::Question
-    )
-    if ($confirm -eq [System.Windows.MessageBoxResult]::Yes) {
-        Invoke-BoostWithUI -DryRun $false
-    }
+    Invoke-BoostWithUI -DryRun $false
 })
 
 function Refresh-BoostPowerPlan {
