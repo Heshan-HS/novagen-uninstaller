@@ -62,8 +62,12 @@ try {
 # ============================================================================
 # 3. GLOBAL WORKSPACE & SAFETY CONFIGURATIONS
 # ============================================================================
-$Script:AppRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
-if (-not $Script:AppRoot) { $Script:AppRoot = "d:\uinsitaler" }
+if (-not [string]::IsNullOrWhiteSpace($env:NOVAGEN_DATA_DIR)) {
+    $Script:AppRoot = $env:NOVAGEN_DATA_DIR
+} else {
+    $Script:AppRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
+    if (-not $Script:AppRoot) { $Script:AppRoot = "d:\uinsitaler" }
+}
 $Script:BackupRoot = Join-Path $Script:AppRoot "Backups"
 $Script:SnapshotRoot = Join-Path $Script:AppRoot "Snapshots"
 $Script:LogRoot = Join-Path $Script:AppRoot "Logs"
@@ -1949,6 +1953,9 @@ function Update-SystemTelemetry {
     foreach ($a in $Script:AllAppsCache) { $totalBytes += $a.SizeBytes }
     $Controls['KpiTotalSize'].Text = Format-ByteSize $totalBytes
     $Controls['KpiReclaimed'].Text = Format-ByteSize $Script:SessionReclaimedBytes
+    if ($Controls['LblBackupPathInfo']) {
+        $Controls['LblBackupPathInfo'].Text = "Backups: $Script:BackupRoot"
+    }
 }
 
 function Update-InspectorCounters {
