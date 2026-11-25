@@ -2795,9 +2795,118 @@ function Invoke-PCSpeedBoost {
             </Border>
 
             <!-- ============================================================ -->
+            <!-- RIGHT PANE (ALT): PC SPEED BOOST TELEMETRY & STARTUP MANAGER -->
+            <!-- ============================================================ -->
+            <Border x:Name="PaneRightBoostIntel" Grid.Column="2" Visibility="Collapsed" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Header -->
+                    <StackPanel Grid.Row="0" Margin="0,0,0,8">
+                        <TextBlock Text="PERFORMANCE COMMAND CENTER" Foreground="{DynamicResource PrimaryInk}" FontSize="12" FontWeight="Bold"/>
+                        <TextBlock Text="Live RAM consumers, power profile &amp; startup boot accelerator" Foreground="{DynamicResource MutedInk}" FontSize="10"/>
+                    </StackPanel>
+
+                    <!-- Quick Presets -->
+                    <Border Grid.Row="1" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,0,0,8">
+                        <StackPanel>
+                            <TextBlock Text="QUICK OPTIMIZATION PRESETS" Foreground="{DynamicResource AccentCyan}" FontSize="9" FontWeight="Bold" Margin="0,0,0,6"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Button x:Name="BtnPresetSafe" Grid.Column="0" Content="✓ Safe" Style="{StaticResource BtnSecondary}" Margin="0,0,4,0" Padding="6,5" FontSize="11"/>
+                                <Button x:Name="BtnPresetGaming" Grid.Column="1" Content="⚡ Gaming" Style="{StaticResource BtnSecondary}" Margin="0,0,4,0" Padding="6,5" FontSize="11"/>
+                                <Button x:Name="BtnPresetMax" Grid.Column="2" Content="🔥 Max Clean" Style="{StaticResource BtnSecondary}" Padding="6,5" FontSize="11"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Active Power Plan Card -->
+                    <Border Grid.Row="2" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,0,0,8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="ACTIVE WINDOWS POWER PLAN" Foreground="{DynamicResource MutedInk}" FontSize="9" FontWeight="Bold"/>
+                                <TextBlock x:Name="TxtBoostPowerPlan" Text="Balanced" Foreground="{DynamicResource PrimaryInk}" FontSize="12" FontWeight="Bold" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <Button x:Name="BtnBoostTogglePower" Grid.Column="1" Content="⚡ High Perf" Style="{StaticResource BtnPrimary}" Padding="10,5" FontSize="11"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Top Memory Consumers -->
+                    <Border Grid.Row="3" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,0,0,8">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0" Margin="0,0,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="TOP RAM CONSUMERS (LIVE)" Foreground="{DynamicResource AccentCyan}" FontSize="9" FontWeight="Bold" VerticalAlignment="Center"/>
+                                <Button x:Name="BtnBoostRefreshProcs" Grid.Column="1" Content="↻ Refresh" Style="{StaticResource BtnSecondary}" Padding="6,2" FontSize="10"/>
+                            </Grid>
+                            <DataGrid x:Name="GridBoostTopProcs" Grid.Row="1" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column"
+                                      Background="Transparent" BorderThickness="0" GridLinesVisibility="Horizontal" RowHeight="24">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="PROCESS" Binding="{Binding Name}" Width="*"/>
+                                    <DataGridTextColumn Header="RAM" Binding="{Binding MemDisplay}" Width="70"/>
+                                    <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="55"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </Border>
+
+                    <!-- Startup Boot Accelerator -->
+                    <Border Grid.Row="4" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,0,0,8">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0" Margin="0,0,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="STARTUP BOOT ACCELERATOR" Foreground="{DynamicResource AccentCyan}" FontSize="9" FontWeight="Bold" VerticalAlignment="Center"/>
+                                <Button x:Name="BtnBoostScanStartup" Grid.Column="1" Content="Scan Startup" Style="{StaticResource BtnSecondary}" Padding="6,2" FontSize="10"/>
+                            </Grid>
+                            <DataGrid x:Name="GridBoostStartup" Grid.Row="1" AutoGenerateColumns="False" HeadersVisibility="Column"
+                                      Background="Transparent" BorderThickness="0" GridLinesVisibility="Horizontal" RowHeight="24">
+                                <DataGrid.Columns>
+                                    <DataGridCheckBoxColumn Header="✓" Binding="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="28"/>
+                                    <DataGridTextColumn Header="STARTUP APP" Binding="{Binding Name}" Width="*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="SCOPE" Binding="{Binding Scope}" Width="55" IsReadOnly="True"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </Border>
+
+                    <!-- Startup Action Footer -->
+                    <Button x:Name="BtnBoostDisableStartup" Grid.Row="5" Content="Disable Selected Startup Entries (Auto-Backup)" Style="{StaticResource BtnDanger}" Padding="10,7" FontSize="11"/>
+                </Grid>
+            </Border>
+
+            <!-- ============================================================ -->
             <!-- RIGHT PANE: DEEP-SCAN LEFTOVER INSPECTOR & NUKE ENGINE       -->
             <!-- ============================================================ -->
-            <Border Grid.Column="2" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+            <Border x:Name="PaneRightInspector" Grid.Column="2" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -2978,6 +3087,13 @@ function Switch-WorkspaceView {
     foreach ($v in $views) {
         $Controls[$v].Visibility = if ($v -eq $ViewName) { 'Visible' } else { 'Collapsed' }
     }
+    if ($ViewName -eq 'ViewPCBoost') {
+        $Controls['PaneRightInspector'].Visibility  = 'Collapsed'
+        $Controls['PaneRightBoostIntel'].Visibility = 'Visible'
+    } else {
+        $Controls['PaneRightInspector'].Visibility  = 'Visible'
+        $Controls['PaneRightBoostIntel'].Visibility = 'Collapsed'
+    }
 }
 
 $Controls['NavBtnApps'].Add_Click({ Switch-WorkspaceView 'ViewInstalledApps' })
@@ -3002,6 +3118,7 @@ $Controls['NavBtnBoost'].Add_Click({
     Switch-WorkspaceView 'ViewPCBoost'
     $isIdle = ($Controls['TxtBoostStatus'].Text -eq 'READY')
     Update-BoostRamTelemetry -UpdateRing $isIdle
+    Update-BoostCommandCenter
 })
 
 $Script:CurrentAppFilterCategory = "ALL"
@@ -3274,6 +3391,8 @@ function Invoke-BoostWithUI {
             $Script:SessionReclaimedBytes += $result.TotalFreedBytes
         }
         Update-BoostRamTelemetry -UpdateRing $false
+        Refresh-BoostPowerPlan
+        Refresh-BoostTopProcesses
         Update-SystemTelemetry
     } else {
         $Controls['TxtBoostStatus'].Text   = "ERROR"
@@ -3300,6 +3419,156 @@ $Controls['BtnBoostNow'].Add_Click({
         Invoke-BoostWithUI -DryRun $false
     }
 })
+
+function Refresh-BoostPowerPlan {
+    try {
+        $raw = (& powercfg /getactivescheme 2>&1) -join ' '
+        if ($raw -match '\(([^)]+)\)') {
+            $planName = $Matches[1]
+            $Controls['TxtBoostPowerPlan'].Text = $planName
+            if ($planName -match 'High|Ultimate') {
+                $Controls['BtnBoostTogglePower'].Content = "⚖ Balanced"
+            } else {
+                $Controls['BtnBoostTogglePower'].Content = "⚡ High Perf"
+            }
+        }
+    } catch {}
+}
+
+function Refresh-BoostTopProcesses {
+    try {
+        $list = New-Object System.Collections.ObjectModel.ObservableCollection[PSObject]
+        $procs = Get-Process -ErrorAction SilentlyContinue | Sort-Object WorkingSet64 -Descending | Select-Object -First 8
+        foreach ($p in $procs) {
+            $mb = [Math]::Round($p.WorkingSet64 / 1MB, 0)
+            $list.Add([PSCustomObject]@{
+                Name       = $p.ProcessName
+                MemDisplay = "$mb MB"
+                Pid        = $p.Id
+            })
+        }
+        $Controls['GridBoostTopProcs'].ItemsSource = $list
+    } catch {}
+}
+
+function Refresh-BoostStartupList {
+    $list = New-Object System.Collections.ObjectModel.ObservableCollection[PSObject]
+    $regRoots = @(
+        @{ Path = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"; Scope = "User";   Export = "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" },
+        @{ Path = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run"; Scope = "System"; Export = "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" },
+        @{ Path = "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run"; Scope = "x86"; Export = "HKLM\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run" }
+    )
+    foreach ($rr in $regRoots) {
+        if (-not (Test-Path $rr.Path)) { continue }
+        try {
+            $key = Get-Item -LiteralPath $rr.Path -ErrorAction SilentlyContinue
+            foreach ($valName in $key.GetValueNames()) {
+                if ([string]::IsNullOrWhiteSpace($valName)) { continue }
+                $cmd = $key.GetValue($valName)
+                $list.Add([PSCustomObject]@{
+                    IsSelected = $false
+                    Name       = $valName
+                    Scope      = $rr.Scope
+                    Command    = [string]$cmd
+                    RegPath    = $rr.Path
+                    ExportPath = $rr.Export
+                })
+            }
+        } catch {}
+    }
+    $Controls['GridBoostStartup'].ItemsSource = $list
+}
+
+function Update-BoostCommandCenter {
+    Refresh-BoostPowerPlan
+    Refresh-BoostTopProcesses
+    if (-not $Controls['GridBoostStartup'].ItemsSource) {
+        Refresh-BoostStartupList
+    }
+}
+
+$Controls['BtnBoostRefreshProcs'].Add_Click({ Refresh-BoostTopProcesses })
+$Controls['BtnBoostScanStartup'].Add_Click({ Refresh-BoostStartupList })
+
+$Controls['BtnBoostTogglePower'].Add_Click({
+    try {
+        $cur = $Controls['TxtBoostPowerPlan'].Text
+        if ($cur -match 'High|Ultimate') {
+            & powercfg /setactive 381b4222-f694-41f0-9685-ff5bb260df2e 2>&1 | Out-Null
+            Write-BoostLog "Power Plan switched to: Balanced" "OK"
+        } else {
+            $hp = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"
+            & powercfg /setactive $hp 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                & powercfg /duplicatescheme $hp 2>&1 | Out-Null
+                & powercfg /setactive $hp 2>&1 | Out-Null
+            }
+            Write-BoostLog "Power Plan switched to: High Performance!" "OK"
+        }
+        Refresh-BoostPowerPlan
+    } catch {}
+})
+
+$Controls['BtnBoostDisableStartup'].Add_Click({
+    $items = $Controls['GridBoostStartup'].ItemsSource
+    if (-not $items) { return }
+    $selected = @($items | Where-Object { $_.IsSelected })
+    if ($selected.Count -eq 0) {
+        [System.Windows.MessageBox]::Show("Tick at least one startup entry to disable.", "NovaGen // Startup Accelerator", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information) | Out-Null
+        return
+    }
+    $confirm = [System.Windows.MessageBox]::Show(
+        "Disable $($selected.Count) selected startup item(s)?`n`nA full .reg backup will be saved to Backups\ before removing.",
+        "NovaGen // Startup Accelerator",
+        [System.Windows.MessageBoxButton]::YesNo,
+        [System.Windows.MessageBoxImage]::Question
+    )
+    if ($confirm -ne [System.Windows.MessageBoxResult]::Yes) { return }
+
+    $ts = Get-Date -Format "yyyyMMdd_HHmmss"
+    $exported = @{}
+    foreach ($s in $selected) {
+        try {
+            if (-not $exported.ContainsKey($s.ExportPath)) {
+                $bkFile = Join-Path $Script:BackupRoot "Startup_$($s.Scope)_$ts.reg"
+                & reg.exe export $s.ExportPath $bkFile /y 2>&1 | Out-Null
+                $exported[$s.ExportPath] = $true
+            }
+            Remove-ItemProperty -LiteralPath $s.RegPath -Name $s.Name -Force -ErrorAction SilentlyContinue
+            Write-BoostLog "Startup Disabled [$($s.Scope)]: $($s.Name) (Backed up)" "OK"
+        } catch {
+            Write-BoostLog "Startup Failed [$($s.Name)]: $_" "WARN"
+        }
+    }
+    Refresh-BoostStartupList
+})
+
+function Set-BoostPreset {
+    param([string]$Mode)
+    # Reset optional ones first
+    $Controls['ChkBoostRAM'].IsChecked      = $true
+    $Controls['ChkBoostWinTemp'].IsChecked  = $true
+    $Controls['ChkBoostBrowser'].IsChecked  = $true
+    $Controls['ChkBoostGPU'].IsChecked      = $true
+    $Controls['ChkBoostUWP'].IsChecked      = $true
+    $Controls['ChkBoostPrefetch'].IsChecked = $true
+    $Controls['ChkBoostDNS'].IsChecked      = $true
+    $Controls['ChkBoostWU'].IsChecked       = $true
+    $Controls['ChkBoostThumb'].IsChecked    = $true
+    $Controls['ChkBoostWER'].IsChecked      = $true
+    $Controls['ChkBoostDelivOpt'].IsChecked = $true
+    $Controls['ChkBoostTRIM'].IsChecked     = $true
+    $Controls['ChkBoostPower'].IsChecked    = ($Mode -eq 'GAMING' -or $Mode -eq 'MAX')
+    $Controls['ChkBoostFont'].IsChecked     = ($Mode -eq 'MAX')
+    $Controls['ChkBoostRecycle'].IsChecked  = ($Mode -eq 'MAX')
+    $Controls['ChkBoostDISM'].IsChecked     = ($Mode -eq 'MAX')
+    $Controls['ChkBoostEventLogs'].IsChecked = $false
+    Write-BoostLog "Preset Applied: $Mode" "INFO"
+}
+
+$Controls['BtnPresetSafe'].Add_Click({ Set-BoostPreset 'SAFE' })
+$Controls['BtnPresetGaming'].Add_Click({ Set-BoostPreset 'GAMING' })
+$Controls['BtnPresetMax'].Add_Click({ Set-BoostPreset 'MAX' })
 
 # ============================================================================
 # 13. CORE UNINSTALL & DEEP SCAN BUTTON HANDLERS
