@@ -1,4 +1,4 @@
-# NovaGen Deep Uninstaller Pro
+﻿# NovaGen Deep Uninstaller Pro
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6?style=flat-square&logo=windows)
 ![Engine](https://img.shields.io/badge/Engine-PowerShell%20%2B%20WPF-2563EB?style=flat-square)
@@ -18,7 +18,7 @@ Standard uninstallers often leave behind configuration files, license caches, re
 
 | Module | Description |
 | :--- | :--- |
-| **Installed Applications** | Indexes Win32 (`x64`, `x86`) and Current-User apps with instant search, category filters, size sorting (`Sort: Size ↓`), and exact disk footprint calculation. |
+| **Installed Applications** | Indexes Win32 (`x64`, `x86`) and Current-User apps with instant search, category filters, size sorting (`Sort: Size â†“`), and exact disk footprint calculation. |
 | **100% Deep Uninstall + Wipe** | Terminates running processes, executes the official uninstaller, and scans 18 filesystem and registry locations for remaining artifacts. |
 | **Force Hunt & Fresh Config Reset** | Scans leftovers for broken/corrupt apps without needing an official uninstaller, or resets user/config/cache traces for a clean state. |
 | **Store & Bloatware Remover** | Lists removable Microsoft Store / UWP packages and clears their `AppData\Local\Packages` cache. |
@@ -69,13 +69,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Build-NovaGen-Exe.ps1
 
 ```text
 novagen-uninstaller/
-├── NovaGen.exe                 # Native Windows launcher executable (UAC elevated)
-├── NovaGen-Uninstaller.bat     # Batch launcher alternative
-├── NovaGen-Engine.ps1          # Core 18-point deep uninstaller & WPF GUI
-├── Build-NovaGen-Exe.ps1       # .NET C# compiler & icon generator script
-├── NovaGen.ico                 # Application icon
-├── LICENSE                     # MIT License
-└── README.md                   # Documentation
+â”œâ”€â”€ NovaGen.exe                 # Native Windows launcher executable (UAC elevated)
+â”œâ”€â”€ NovaGen-Uninstaller.bat     # Batch launcher alternative
+â”œâ”€â”€ NovaGen-Engine.ps1          # Core 18-point deep uninstaller & WPF GUI
+â”œâ”€â”€ Build-NovaGen-Exe.ps1       # .NET C# compiler & icon generator script
+â”œâ”€â”€ NovaGen.ico                 # Application icon
+â”œâ”€â”€ LICENSE                     # MIT License
+â””â”€â”€ README.md                   # Documentation
 ```
 
 ---
@@ -83,3 +83,4 @@ novagen-uninstaller/
 ## License
 
 Licensed under the [MIT License](LICENSE).
+
