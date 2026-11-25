@@ -1165,6 +1165,7 @@ function Compare-SystemInstallSnapshot {
 # ============================================================================
 
 $Script:BoostLog = New-Object System.Collections.Generic.List[string]
+$Script:CurrentBoostPct = 0.0
 
 function Invoke-BoostUiPump {
     try {
@@ -1186,6 +1187,7 @@ function Set-BoostRingProgress {
         [string]$AccentHex = ""
     )
     $p = [Math]::Max(0, [Math]::Min(100, $Percent))
+    $Script:CurrentBoostPct = $p
     try {
         if ($p -le 0.1) {
             $Controls['BoostRingArc'].Data = $null
@@ -1213,6 +1215,31 @@ function Set-BoostRingProgress {
     Invoke-BoostUiPump
 }
 
+function Animate-BoostRingTo {
+    param(
+        [double]$TargetPercent,
+        [string]$RingLabel = "PROGRESS",
+        [string]$ActiveStep = "",
+        [string]$AccentHex = "",
+        [int]$Steps = 8,
+        [int]$DelayMs = 16
+    )
+    $start = $Script:CurrentBoostPct
+    $end   = [Math]::Max(0, [Math]::Min(100, $TargetPercent))
+    if ([Math]::Abs($end - $start) -lt 1.0) {
+        Set-BoostRingProgress -Percent $end -RingLabel $RingLabel -ActiveStep $ActiveStep -AccentHex $AccentHex
+        return
+    }
+    for ($i = 1; $i -le $Steps; $i++) {
+        $t = $i / [double]$Steps
+        # Ease-out cubic
+        $ease = 1.0 - [Math]::Pow(1.0 - $t, 3.0)
+        $val = $start + ($end - $start) * $ease
+        Set-BoostRingProgress -Percent $val -RingLabel $RingLabel -ActiveStep $ActiveStep -AccentHex $AccentHex
+        Start-Sleep -Milliseconds $DelayMs
+    }
+}
+
 function Update-BoostRamTelemetry {
     param([bool]$UpdateRing = $true)
     try {
@@ -1222,10 +1249,10 @@ function Update-BoostRamTelemetry {
             $totalGB = [Math]::Round($snap[1] / 1GB, 1)
             $availGB = [Math]::Round($snap[2] / 1GB, 1)
             $usedGB  = [Math]::Round(($snap[1] - $snap[2]) / 1GB, 1)
-            $Controls['TxtBoostSysRAM'].Text = "$usedGB / $totalGB GB ($loadPct%)"
+            $Controls['TxtBoostSysRAM'].Text = "$usedGB / $totalGB GB"
             if ($UpdateRing) {
                 $ringColor = if ($loadPct -ge 85) { "#EF4444" } elseif ($loadPct -ge 65) { "#F59E0B" } else { "#06B6D4" }
-                Set-BoostRingProgress -Percent $loadPct -RingLabel "RAM USED" -ActiveStep "System RAM: $usedGB GB used, $availGB GB free — Ready to optimize" -AccentHex $ringColor
+                Set-BoostRingProgress -Percent $loadPct -RingLabel "RAM USED" -ActiveStep "System RAM: $usedGB / $totalGB GB ($loadPct%) — Ready to optimize" -AccentHex $ringColor
             }
         }
     } catch {}
@@ -1323,10 +1350,10 @@ function Invoke-PCSpeedBoost {
     if ($totalSteps -le 0) { $totalSteps = 1 }
     $stepIdx = 0
 
-    Set-BoostRingProgress -Percent 2 -RingLabel $ringLabel -ActiveStep "Initializing NovaGen PC Speed Boost Engine..." -AccentHex $ringHex
-    Write-BoostLog "======================================================" "INFO"
+    Set-BoostRingProgress -Percent 0 -RingLabel $ringLabel -ActiveStep "Initializing NovaGen PC Speed Boost Engine..." -AccentHex $ringHex
+    Write-BoostLog "========================================" "INFO"
     Write-BoostLog "NovaGen PC Speed Boost Engine — MODE: $mode" "INFO"
-    Write-BoostLog "======================================================" "INFO"
+    Write-BoostLog "========================================" "INFO"
 
     $totalFreed = [int64]0
     $ramFreedMB = 0
@@ -1334,7 +1361,7 @@ function Invoke-PCSpeedBoost {
     # ---- 1. RAM / Working Set Flush ----
     if ($DoRAM) {
         $stepIdx++
-        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Flushing RAM & Process Working Sets..." -AccentHex $ringHex
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Flushing RAM & Process Working Sets..." -AccentHex $ringHex
         Write-BoostLog "RAM Flush: Measuring system physical memory..." "INFO"
         $memBefore = [NovaGenNative]::GetMemorySnapshot()
         if (-not $DryRun) {
@@ -1367,7 +1394,7 @@ function Invoke-PCSpeedBoost {
     # ---- 2. Windows Temp Files ----
     if ($DoWinTemp) {
         $stepIdx++
-        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Windows Temp Files..." -AccentHex $ringHex
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Windows Temp Files..." -AccentHex $ringHex
         $tempPaths = @("$env:SystemRoot\Temp", "$env:TEMP", "$env:TMP", "$env:LOCALAPPDATA\Temp")
         $catFreed = [int64]0
         foreach ($tp in ($tempPaths | Select-Object -Unique)) {
@@ -1386,7 +1413,7 @@ function Invoke-PCSpeedBoost {
     # ---- 3. Prefetch Files ----
     if ($DoPrefetch) {
         $stepIdx++
-        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Windows Prefetch..." -AccentHex $ringHex
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Windows Prefetch..." -AccentHex $ringHex
         $pfPath = "$env:SystemRoot\Prefetch"
         if (Test-Path $pfPath) {
             $sz = Get-DirectorySizeFast $pfPath
@@ -1407,7 +1434,7 @@ function Invoke-PCSpeedBoost {
     # ---- 4. DNS Cache Flush ----
     if ($DoDNS) {
         $stepIdx++
-        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Flushing DNS Resolver Cache..." -AccentHex $ringHex
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Flushing DNS Resolver Cache..." -AccentHex $ringHex
         if (-not $DryRun) {
             try {
                 & ipconfig /flushdns 2>&1 | Out-Null
@@ -1423,7 +1450,7 @@ function Invoke-PCSpeedBoost {
     # ---- 5. Windows Update Download Cache ----
     if ($DoWUCache) {
         $stepIdx++
-        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Checking Windows Update Cache..." -AccentHex $ringHex
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Checking Windows Update Cache..." -AccentHex $ringHex
         $wuPath = "$env:SystemRoot\SoftwareDistribution\Download"
         if (Test-Path $wuPath) {
             $sz = Get-DirectorySizeFast $wuPath
@@ -1448,7 +1475,7 @@ function Invoke-PCSpeedBoost {
     # ---- 6. Thumbnail Cache ----
     if ($DoThumbnail) {
         $stepIdx++
-        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Thumbnail Cache..." -AccentHex $ringHex
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Thumbnail Cache..." -AccentHex $ringHex
         $thumbPath = "$env:LOCALAPPDATA\Microsoft\Windows\Explorer"
         if (Test-Path $thumbPath) {
             $thumbFiles = Get-ChildItem -LiteralPath $thumbPath -Filter "thumbcache_*.db" -Force -ErrorAction SilentlyContinue
@@ -1477,7 +1504,7 @@ function Invoke-PCSpeedBoost {
     # ---- 7. Font Cache ----
     if ($DoFontCache) {
         $stepIdx++
-        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Checking Font Cache..." -AccentHex $ringHex
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Checking Font Cache..." -AccentHex $ringHex
         $fontPath = "$env:SystemRoot\ServiceProfiles\LocalService\AppData\Local\FontCache"
         if (Test-Path $fontPath) {
             $sz = Get-DirectorySizeFast $fontPath
@@ -1501,7 +1528,7 @@ function Invoke-PCSpeedBoost {
     # ---- 8. Browser Caches ----
     if ($DoBrowserCache) {
         $stepIdx++
-        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Browser Caches..." -AccentHex $ringHex
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Browser Caches..." -AccentHex $ringHex
         $browserPaths = @(
             @{ Name = "Chrome Cache";      Path = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Cache" },
             @{ Name = "Chrome Code Cache"; Path = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Code Cache" },
@@ -1526,7 +1553,7 @@ function Invoke-PCSpeedBoost {
     # ---- 9. Windows Error Reporting ----
     if ($DoWER) {
         $stepIdx++
-        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Windows Error Reports..." -AccentHex $ringHex
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Windows Error Reports..." -AccentHex $ringHex
         $werPaths = @("$env:ProgramData\Microsoft\Windows\WER\ReportArchive",
                       "$env:ProgramData\Microsoft\Windows\WER\ReportQueue",
                       "$env:LOCALAPPDATA\Microsoft\Windows\WER\ReportArchive",
@@ -1546,7 +1573,7 @@ function Invoke-PCSpeedBoost {
     # ---- 10. Delivery Optimization Cache ----
     if ($DoDelivOpt) {
         $stepIdx++
-        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Checking Delivery Optimization..." -AccentHex $ringHex
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Checking Delivery Optimization..." -AccentHex $ringHex
         $doPath = "$env:SystemRoot\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache"
         if (Test-Path $doPath) {
             $sz = Get-DirectorySizeFast $doPath
@@ -1567,7 +1594,7 @@ function Invoke-PCSpeedBoost {
     # ---- 11. Recycle Bin ----
     if ($DoRecycleBin) {
         $stepIdx++
-        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Checking Recycle Bin..." -AccentHex $ringHex
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Checking Recycle Bin..." -AccentHex $ringHex
         try {
             if (-not $DryRun) {
                 Clear-RecycleBin -Force -ErrorAction SilentlyContinue
@@ -1583,7 +1610,7 @@ function Invoke-PCSpeedBoost {
     # ---- 12. Event Logs (Optional — user must opt-in) ----
     if ($DoEventLogs) {
         $stepIdx++
-        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Processing Event Logs..." -AccentHex $ringHex
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Processing Event Logs..." -AccentHex $ringHex
         $logs = @("Application", "System", "Security", "Setup")
         if (-not $DryRun) {
             foreach ($logName in $logs) {
@@ -1602,14 +1629,14 @@ function Invoke-PCSpeedBoost {
     # ---- FINAL SUMMARY ----
     $doneLabel = if ($DryRun) { "ANALYZED" } else { "OPTIMIZED" }
     $doneStep  = if ($DryRun) { "Analyze Complete — $(Format-ByteSize $totalFreed) disk + ~$ramFreedMB MB RAM ready to clean" } else { "Boost Complete — $(Format-ByteSize $totalFreed) disk freed + $ramFreedMB MB RAM reclaimed!" }
-    Set-BoostRingProgress -Percent 100 -RingLabel $doneLabel -ActiveStep $doneStep -AccentHex "#22C55E"
-    Write-BoostLog "======================================================" "INFO"
+    Animate-BoostRingTo -TargetPercent 100 -RingLabel $doneLabel -ActiveStep $doneStep -AccentHex "#22C55E" -Steps 12 -DelayMs 18
+    Write-BoostLog "========================================" "INFO"
     if ($DryRun) {
         Write-BoostLog "ANALYZE COMPLETE — Estimated savings: $(Format-ByteSize $totalFreed) disk + ~$ramFreedMB MB RAM" "OK"
     } else {
         Write-BoostLog "BOOST COMPLETE — Disk freed: $(Format-ByteSize $totalFreed) | RAM flushed: $ramFreedMB MB" "OK"
     }
-    Write-BoostLog "======================================================" "INFO"
+    Write-BoostLog "========================================" "INFO"
 
     return [PSCustomObject]@{
         TotalFreedBytes = $totalFreed
