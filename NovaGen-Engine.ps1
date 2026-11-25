@@ -1302,25 +1302,46 @@ function Get-BoostCategorySize {
 
 function Invoke-BoostCleanPath {
     param([string]$Path, [bool]$DryRun = $false, [string]$Label = "")
-    $freed = [int64]0
-    if (-not (Test-Path -LiteralPath $Path)) { return $freed }
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return [int64]0 }
+    if (Test-IsProtectedPath $Path) { return [int64]0 }
+
+    $beforeSz = Get-DirectorySizeFast $Path
+    if ($DryRun) { return $beforeSz }
+    if ($beforeSz -le 0) {
+        # Still try removing empty dirs/0-byte files
+        try {
+            Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue | ForEach-Object {
+                Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        } catch {}
+        return [int64]0
+    }
+
+    # Delete file-by-file so a single locked file never blocks cleaning unlocked sibling files
     try {
-        $items = Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue
-        foreach ($item in $items) {
+        $files = Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue
+        foreach ($f in $files) {
             try {
-                $sz = if ($item.PSIsContainer) { Get-DirectorySizeFast $item.FullName } else { [int64]$item.Length }
-                if (-not $DryRun) {
-                    if ($item.PSIsContainer) {
-                        Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction SilentlyContinue
-                    } else {
-                        Remove-Item -LiteralPath $item.FullName -Force -ErrorAction SilentlyContinue
-                    }
+                [System.IO.File]::Delete($f.FullName)
+            } catch {
+                try { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue } catch {}
+            }
+        }
+        # Clean empty directories bottom-up
+        $dirs = Get-ChildItem -LiteralPath $Path -Recurse -Directory -Force -ErrorAction SilentlyContinue | Sort-Object { $_.FullName.Length } -Descending
+        foreach ($d in $dirs) {
+            try {
+                if ((Get-ChildItem -LiteralPath $d.FullName -Force -ErrorAction SilentlyContinue | Measure-Object).Count -eq 0) {
+                    Remove-Item -LiteralPath $d.FullName -Force -ErrorAction SilentlyContinue
                 }
-                $freed += $sz
             } catch {}
         }
     } catch {}
-    return $freed
+
+    $afterSz = Get-DirectorySizeFast $Path
+    $actualFreed = [int64]($beforeSz - $afterSz)
+    if ($actualFreed -lt 0) { $actualFreed = [int64]0 }
+    return $actualFreed
 }
 
 function Invoke-PCSpeedBoost {
@@ -1391,23 +1412,43 @@ function Invoke-PCSpeedBoost {
         }
     }
 
-    # ---- 2. Windows Temp Files ----
+    # ---- 2. Windows Temp Files + Shader & Crash Caches ----
     if ($DoWinTemp) {
         $stepIdx++
-        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Windows Temp Files..." -AccentHex $ringHex
-        $tempPaths = @("$env:SystemRoot\Temp", "$env:TEMP", "$env:TMP", "$env:LOCALAPPDATA\Temp")
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Deep Cleaning Temp & Shader Caches..." -AccentHex $ringHex
+        $tempPaths = @(
+            "$env:SystemRoot\Temp",
+            "$env:TEMP",
+            "$env:TMP",
+            "$env:LOCALAPPDATA\Temp",
+            "$env:LOCALAPPDATA\D3DSCache",
+            "$env:LOCALAPPDATA\CrashDumps"
+        )
+        $catFound = [int64]0
         $catFreed = [int64]0
         foreach ($tp in ($tempPaths | Select-Object -Unique)) {
             if (Test-Path $tp) {
                 $sz = Get-DirectorySizeFast $tp
-                Write-BoostLog "Windows Temp [$tp]: $(Format-ByteSize $sz) found." "INFO"
-                $catFreed += Invoke-BoostCleanPath -Path $tp -DryRun $DryRun -Label "WinTemp"
+                if ($sz -gt 0) {
+                    $catFound += $sz
+                    Write-BoostLog "Temp/Cache [$tp]: $(Format-ByteSize $sz) found." "INFO"
+                    $catFreed += Invoke-BoostCleanPath -Path $tp -DryRun $DryRun -Label "WinTemp"
+                }
             }
         }
         $totalFreed += $catFreed
         $Controls['TxtBoostEstimate'].Text = Format-ByteSize $totalFreed
-        if (-not $DryRun) { $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed }
-        Write-BoostLog "Windows Temp: $(Format-ByteSize $catFreed) $(if($DryRun){'would be freed'}else{'freed'})." "OK"
+        if (-not $DryRun) {
+            $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed
+            $lockedLeft = [Math]::Max([int64]0, $catFound - $catFreed)
+            if ($lockedLeft -gt 1MB) {
+                Write-BoostLog "Temp/Cache: $(Format-ByteSize $catFreed) freed ($(Format-ByteSize $lockedLeft) locked by running apps)." "OK"
+            } else {
+                Write-BoostLog "Temp/Cache: $(Format-ByteSize $catFreed) freed." "OK"
+            }
+        } else {
+            Write-BoostLog "Temp/Cache: $(Format-ByteSize $catFreed) would be freed." "OK"
+        }
     }
 
     # ---- 3. Prefetch Files ----
@@ -2727,7 +2768,8 @@ $Controls['NavBtnSnapshot'].Add_Click({
 
 $Controls['NavBtnBoost'].Add_Click({
     Switch-WorkspaceView 'ViewPCBoost'
-    Update-BoostRamTelemetry -UpdateRing $true
+    $isIdle = ($Controls['TxtBoostStatus'].Text -eq 'READY')
+    Update-BoostRamTelemetry -UpdateRing $isIdle
 })
 
 $Script:CurrentAppFilterCategory = "ALL"
