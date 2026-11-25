@@ -85,6 +85,64 @@ public class NovaGenNative {
         }
         return new ulong[] { 0, 0, 0 };
     }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public struct LUID {
+        public uint LowPart;
+        public int HighPart;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public struct TOKEN_PRIVILEGES {
+        public int PrivilegeCount;
+        public LUID Luid;
+        public int Attributes;
+    }
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
+
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool LookupPrivilegeValue(string lpSystemName, string lpName, out LUID lpLuid);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool AdjustTokenPrivileges(IntPtr TokenHandle, bool DisableAllPrivileges, ref TOKEN_PRIVILEGES NewState, int BufferLength, IntPtr PreviousState, IntPtr ReturnLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CloseHandle(IntPtr hObject);
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetCurrentProcess();
+
+    [DllImport("ntdll.dll")]
+    public static extern uint NtSetSystemInformation(int SystemInformationClass, ref int SystemInformation, int SystemInformationLength);
+
+    public static bool PurgeStandbyMemory() {
+        try {
+            IntPtr hToken = IntPtr.Zero;
+            if (!OpenProcessToken(GetCurrentProcess(), 0x0028, out hToken)) return false;
+            try {
+                LUID luid;
+                if (!LookupPrivilegeValue(null, "SeProfileSingleProcessPrivilege", out luid)) return false;
+                TOKEN_PRIVILEGES tp = new TOKEN_PRIVILEGES();
+                tp.PrivilegeCount = 1;
+                tp.Luid = luid;
+                tp.Attributes = 0x00000002; // SE_PRIVILEGE_ENABLED
+                AdjustTokenPrivileges(hToken, false, ref tp, Marshal.SizeOf(tp), IntPtr.Zero, IntPtr.Zero);
+            } finally {
+                CloseHandle(hToken);
+            }
+            int purgeCmd = 4; // MemoryPurgeStandbyList
+            uint status = NtSetSystemInformation(80, ref purgeCmd, sizeof(int)); // SystemMemoryListInformation = 80
+            return (status == 0);
+        } catch {
+            return false;
+        }
+    }
 }
 "@
 try {
@@ -1355,9 +1413,14 @@ function Invoke-PCSpeedBoost {
         [bool]$DoThumbnail = $true,
         [bool]$DoFontCache = $false,
         [bool]$DoBrowserCache = $true,
+        [bool]$DoGPUCache = $true,
+        [bool]$DoUWPCache = $true,
         [bool]$DoWER = $true,
         [bool]$DoDelivOpt = $true,
+        [bool]$DoSSDTrim = $true,
+        [bool]$DoPowerPlan = $false,
         [bool]$DoRecycleBin = $false,
+        [bool]$DoDISMClean = $false,
         [bool]$DoEventLogs = $false
     )
 
@@ -1366,7 +1429,7 @@ function Invoke-PCSpeedBoost {
     $ringLabel = if ($DryRun) { "ANALYZING" } else { "BOOSTING" }
     $ringHex   = if ($DryRun) { "#06B6D4" } else { "#22C55E" }
 
-    $enabledFlags = @($DoRAM, $DoWinTemp, $DoPrefetch, $DoDNS, $DoWUCache, $DoThumbnail, $DoFontCache, $DoBrowserCache, $DoWER, $DoDelivOpt, $DoRecycleBin, $DoEventLogs)
+    $enabledFlags = @($DoRAM, $DoWinTemp, $DoPrefetch, $DoDNS, $DoWUCache, $DoThumbnail, $DoFontCache, $DoBrowserCache, $DoGPUCache, $DoUWPCache, $DoWER, $DoDelivOpt, $DoSSDTrim, $DoPowerPlan, $DoRecycleBin, $DoDISMClean, $DoEventLogs)
     $totalSteps = ($enabledFlags | Where-Object { $_ -eq $true }).Count
     if ($totalSteps -le 0) { $totalSteps = 1 }
     $stepIdx = 0
@@ -1397,13 +1460,16 @@ function Invoke-PCSpeedBoost {
                     }
                 } catch {}
             }
-            Start-Sleep -Milliseconds 350
+            Start-Sleep -Milliseconds 250
+            $standbyOk = [NovaGenNative]::PurgeStandbyMemory()
+            Start-Sleep -Milliseconds 200
             $memAfter = [NovaGenNative]::GetMemorySnapshot()
             $diffBytes = [int64]$memAfter[2] - [int64]$memBefore[2]
             $ramFreedMB = if ($diffBytes -gt 0) { [int][Math]::Round($diffBytes / 1MB) } else { 0 }
             $Controls['TxtBoostRAM'].Text = "$ramFreedMB MB"
             Update-BoostRamTelemetry -UpdateRing $false
-            Write-BoostLog "RAM Flush: Trimmed $flushed processes — $ramFreedMB MB physical RAM reclaimed!" "OK"
+            $sbNote = if ($standbyOk) { " + Standby RAM List Purged" } else { "" }
+            Write-BoostLog "RAM Flush: Trimmed $flushed processes$sbNote — $ramFreedMB MB physical RAM reclaimed!" "OK"
         } else {
             $usedMB = [int][Math]::Round(($memBefore[1] - $memBefore[2]) / 1MB)
             $ramFreedMB = [Math]::Max(32, [int][Math]::Round($usedMB * 0.08))
@@ -1566,29 +1632,111 @@ function Invoke-PCSpeedBoost {
         }
     }
 
-    # ---- 8. Browser Caches ----
+    # ---- 8. All Browsers Deep Cache (Brave, Chrome, Edge, Opera, Vivaldi, Firefox — All Profiles) ----
     if ($DoBrowserCache) {
         $stepIdx++
-        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Browser Caches..." -AccentHex $ringHex
-        $browserPaths = @(
-            @{ Name = "Chrome Cache";      Path = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Cache" },
-            @{ Name = "Chrome Code Cache"; Path = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Code Cache" },
-            @{ Name = "Edge Cache";        Path = "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Cache" },
-            @{ Name = "Edge Code Cache";   Path = "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Code Cache" },
-            @{ Name = "Firefox Cache";     Path = "$env:LOCALAPPDATA\Mozilla\Firefox\Profiles" }
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning All Browser Caches (Brave/Chrome/Edge/FF)..." -AccentHex $ringHex
+        $chromiumRoots = @(
+            @{ Name = "Brave";    Root = "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data" },
+            @{ Name = "Chrome";   Root = "$env:LOCALAPPDATA\Google\Chrome\User Data" },
+            @{ Name = "Edge";     Root = "$env:LOCALAPPDATA\Microsoft\Edge\User Data" },
+            @{ Name = "Opera";    Root = "$env:APPDATA\Opera Software\Opera Stable" },
+            @{ Name = "OperaGX";  Root = "$env:APPDATA\Opera Software\Opera GX Stable" },
+            @{ Name = "Vivaldi";  Root = "$env:LOCALAPPDATA\Vivaldi\User Data" }
+        )
+        $cacheSubDirs = @("Cache", "Code Cache", "GPUCache", "Service Worker\CacheStorage")
+        $catFreed = [int64]0
+
+        foreach ($br in $chromiumRoots) {
+            if (-not (Test-Path $br.Root)) { continue }
+            # Check direct (Opera) and profile folders (Default, Profile *)
+            $profileDirs = @($br.Root)
+            $subProfiles = Get-ChildItem -LiteralPath $br.Root -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq 'Default' -or $_.Name -like 'Profile *' }
+            foreach ($sp in $subProfiles) { $profileDirs += $sp.FullName }
+
+            $brTotal = [int64]0
+            foreach ($pDir in ($profileDirs | Select-Object -Unique)) {
+                foreach ($sub in $cacheSubDirs) {
+                    $target = Join-Path $pDir $sub
+                    if (Test-Path -LiteralPath $target) {
+                        $brTotal += Invoke-BoostCleanPath -Path $target -DryRun $DryRun -Label $br.Name
+                    }
+                }
+            }
+            if ($brTotal -gt 0) {
+                $catFreed += $brTotal
+                Write-BoostLog "$($br.Name) Cache: $(Format-ByteSize $brTotal) $(if($DryRun){'found'}else{'freed'})." "INFO"
+            }
+        }
+
+        # Firefox cache2 across all profiles
+        $ffRoot = "$env:LOCALAPPDATA\Mozilla\Firefox\Profiles"
+        if (Test-Path $ffRoot) {
+            $ffTotal = [int64]0
+            Get-ChildItem -LiteralPath $ffRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                $c2 = Join-Path $_.FullName "cache2"
+                if (Test-Path -LiteralPath $c2) {
+                    $ffTotal += Invoke-BoostCleanPath -Path $c2 -DryRun $DryRun -Label "Firefox"
+                }
+            }
+            if ($ffTotal -gt 0) {
+                $catFreed += $ffTotal
+                Write-BoostLog "Firefox Cache: $(Format-ByteSize $ffTotal) $(if($DryRun){'found'}else{'freed'})." "INFO"
+            }
+        }
+
+        $totalFreed += $catFreed
+        $Controls['TxtBoostEstimate'].Text = Format-ByteSize $totalFreed
+        if (-not $DryRun) { $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed }
+        Write-BoostLog "All Browsers Deep Cache: $(Format-ByteSize $catFreed) $(if($DryRun){'would be freed'}else{'freed'})." "OK"
+    }
+
+    # ---- 8B. GPU Shader Caches (NVIDIA / AMD / Intel) ----
+    if ($DoGPUCache) {
+        $stepIdx++
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning GPU Shader Caches..." -AccentHex $ringHex
+        $gpuPaths = @(
+            @{ Name = "NVIDIA DXCache";    Path = "$env:LOCALAPPDATA\NVIDIA\DXCache" },
+            @{ Name = "NVIDIA GLCache";    Path = "$env:LOCALAPPDATA\NVIDIA\GLCache" },
+            @{ Name = "AMD DxCache";       Path = "$env:LOCALAPPDATA\AMD\DxCache" },
+            @{ Name = "Intel ShaderCache"; Path = "$env:LOCALAPPDATA\Intel\ShaderCache" }
         )
         $catFreed = [int64]0
-        foreach ($b in $browserPaths) {
-            if (Test-Path $b.Path) {
-                $sz = Get-DirectorySizeFast $b.Path
-                Write-BoostLog "$($b.Name): $(Format-ByteSize $sz) found." "INFO"
-                $catFreed += Invoke-BoostCleanPath -Path $b.Path -DryRun $DryRun -Label $b.Name
+        foreach ($gp in $gpuPaths) {
+            if (Test-Path $gp.Path) {
+                $sz = Get-DirectorySizeFast $gp.Path
+                if ($sz -gt 0) {
+                    Write-BoostLog "$($gp.Name): $(Format-ByteSize $sz) found." "INFO"
+                    $catFreed += Invoke-BoostCleanPath -Path $gp.Path -DryRun $DryRun -Label $gp.Name
+                }
             }
         }
         $totalFreed += $catFreed
         $Controls['TxtBoostEstimate'].Text = Format-ByteSize $totalFreed
         if (-not $DryRun) { $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed }
-        Write-BoostLog "Browser Caches: $(Format-ByteSize $catFreed) $(if($DryRun){'would be freed'}else{'freed'})." "OK"
+        Write-BoostLog "GPU Shader Caches: $(Format-ByteSize $catFreed) $(if($DryRun){'would be freed'}else{'freed'})." "OK"
+    }
+
+    # ---- 8C. Store / UWP App TempState Caches ----
+    if ($DoUWPCache) {
+        $stepIdx++
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Cleaning Store/UWP App Temp Caches..." -AccentHex $ringHex
+        $pkgRoot = "$env:LOCALAPPDATA\Packages"
+        $catFreed = [int64]0
+        if (Test-Path $pkgRoot) {
+            Get-ChildItem -LiteralPath $pkgRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                foreach ($sub in @("TempState", "AC\Temp")) {
+                    $tp = Join-Path $_.FullName $sub
+                    if (Test-Path -LiteralPath $tp) {
+                        $catFreed += Invoke-BoostCleanPath -Path $tp -DryRun $DryRun -Label "UWP"
+                    }
+                }
+            }
+        }
+        $totalFreed += $catFreed
+        $Controls['TxtBoostEstimate'].Text = Format-ByteSize $totalFreed
+        if (-not $DryRun) { $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed }
+        Write-BoostLog "Store/UWP Temp Caches: $(Format-ByteSize $catFreed) $(if($DryRun){'would be freed'}else{'freed'})." "OK"
     }
 
     # ---- 9. Windows Error Reporting ----
@@ -1632,6 +1780,52 @@ function Invoke-PCSpeedBoost {
         }
     }
 
+    # ---- 10B. SSD TRIM Optimization ----
+    if ($DoSSDTrim) {
+        $stepIdx++
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Running SSD TRIM Optimization..." -AccentHex $ringHex
+        try {
+            $sysDrive = $env:SystemDrive.TrimEnd(':')
+            $hasSSD = (Get-PhysicalDisk -ErrorAction SilentlyContinue | Where-Object { $_.MediaType -eq 'SSD' }).Count -gt 0
+            if ($hasSSD) {
+                if (-not $DryRun) {
+                    Optimize-Volume -DriveLetter $sysDrive -ReTrim -ErrorAction SilentlyContinue
+                    Write-BoostLog "SSD TRIM: ReTrim completed on $($sysDrive): drive." "OK"
+                } else {
+                    Write-BoostLog "SSD TRIM: Would run ReTrim on SSD ($($sysDrive):). (Dry Run)" "DRY"
+                }
+            } else {
+                Write-BoostLog "SSD TRIM: No SSD detected (or virtual disk) — skipped safely." "INFO"
+            }
+        } catch {
+            Write-BoostLog "SSD TRIM: Skipped (not supported on this volume)." "WARN"
+        }
+    }
+
+    # ---- 10C. Turbo High-Performance Power Plan (Opt-In) ----
+    if ($DoPowerPlan) {
+        $stepIdx++
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Activating High-Performance Power Plan..." -AccentHex $ringHex
+        try {
+            $activeScheme = (& powercfg /getactivescheme 2>&1) -join ' '
+            if (-not $DryRun) {
+                # Try High Performance first; if missing, duplicate it
+                $hpGuid = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"
+                & powercfg /setactive $hpGuid 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                    & powercfg /duplicatescheme $hpGuid 2>&1 | Out-Null
+                    & powercfg /setactive $hpGuid 2>&1 | Out-Null
+                }
+                $newScheme = (& powercfg /getactivescheme 2>&1) -join ' '
+                Write-BoostLog "Power Plan: Active -> $newScheme" "OK"
+            } else {
+                Write-BoostLog "Power Plan: Current -> $activeScheme | Would switch to High Performance. (Dry Run)" "DRY"
+            }
+        } catch {
+            Write-BoostLog "Power Plan: Could not switch (Modern Standby / OEM lock)." "WARN"
+        }
+    }
+
     # ---- 11. Recycle Bin ----
     if ($DoRecycleBin) {
         $stepIdx++
@@ -1645,6 +1839,29 @@ function Invoke-PCSpeedBoost {
             }
         } catch {
             Write-BoostLog "Recycle Bin: Skipped (may already be empty)." "WARN"
+        }
+    }
+
+    # ---- 11B. DISM WinSxS Component Cleanup (Opt-In) ----
+    if ($DoDISMClean) {
+        $stepIdx++
+        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Running DISM WinSxS Component Cleanup..." -AccentHex $ringHex
+        if (-not $DryRun) {
+            try {
+                Write-BoostLog "DISM WinSxS: Cleaning superseded Windows Update backups (please wait)..." "INFO"
+                $driveBefore = (Get-PSDrive $env:SystemDrive.TrimEnd(':')).Free
+                & Dism.exe /Online /Cleanup-Image /StartComponentCleanup /Quiet 2>&1 | Out-Null
+                $driveAfter  = (Get-PSDrive $env:SystemDrive.TrimEnd(':')).Free
+                $dismFreed   = [Math]::Max([int64]0, [int64]($driveAfter - $driveBefore))
+                $totalFreed += $dismFreed
+                $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed
+                $Controls['TxtBoostEstimate'].Text = Format-ByteSize $totalFreed
+                Write-BoostLog "DISM WinSxS: Cleanup complete (~$(Format-ByteSize $dismFreed) reclaimed)." "OK"
+            } catch {
+                Write-BoostLog "DISM WinSxS: Skipped or encountered an error." "WARN"
+            }
+        } else {
+            Write-BoostLog "DISM WinSxS: Would run StartComponentCleanup to trim old update backups. (Dry Run)" "DRY"
         }
     }
 
@@ -2475,19 +2692,28 @@ function Invoke-PCSpeedBoost {
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="*"/>
                                     </Grid.RowDefinitions>
-                                    <TextBlock Grid.Row="0" Text="BOOST OPERATIONS (12 MODULES)" Foreground="{DynamicResource AccentCyan}" FontSize="10" FontWeight="Bold" Margin="2,0,0,6"/>
+                                    <TextBlock Grid.Row="0" Text="BOOST OPERATIONS (17 PRO MODULES)" Foreground="{DynamicResource AccentCyan}" FontSize="10" FontWeight="Bold" Margin="2,0,0,6"/>
                                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,4,0">
                                         <StackPanel>
-                                            <CheckBox x:Name="ChkBoostRAM"      Content="RAM / Working Set Flush"       Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
-                                            <TextBlock Text="  Trim idle process memory + GC" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+                                            <CheckBox x:Name="ChkBoostRAM"      Content="RAM + Standby List Purge"      Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  Working-set trim + NtSetSystemInfo purge" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
-                                            <CheckBox x:Name="ChkBoostWinTemp"  Content="Windows Temp Files"             Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
-                                            <TextBlock Text="  %TEMP%, %TMP%, C:\Windows\Temp" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+                                            <CheckBox x:Name="ChkBoostWinTemp"  Content="Windows Temp &amp; Crash Dumps" Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  %TEMP%, Windows\Temp, CrashDumps" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostBrowser"  Content="All Browsers Deep Cache"        Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  Brave, Chrome, Edge, Opera, Firefox (all profiles)" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostGPU"      Content="GPU Shader Caches"              Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  NVIDIA DX/GLCache, AMD DxCache, D3D" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostUWP"      Content="Store / UWP App Temp Caches"    Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  Packages\*\TempState &amp; AC\Temp" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
                                             <CheckBox x:Name="ChkBoostPrefetch" Content="Prefetch Files"                 Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
                                             <TextBlock Text="  C:\Windows\Prefetch (auto-rebuild)" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
-                                            <CheckBox x:Name="ChkBoostDNS"      Content="DNS Cache"                      Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <CheckBox x:Name="ChkBoostDNS"      Content="DNS Resolver Cache"             Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
                                             <TextBlock Text="  ipconfig /flushdns (instant)" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
                                             <CheckBox x:Name="ChkBoostWU"       Content="Windows Update Cache"           Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
@@ -2496,24 +2722,30 @@ function Invoke-PCSpeedBoost {
                                             <CheckBox x:Name="ChkBoostThumb"    Content="Thumbnail Cache"                Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
                                             <TextBlock Text="  Explorer thumbcache_*.db files" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
-                                            <CheckBox x:Name="ChkBoostFont"     Content="Font Cache"                     Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="False" Margin="0,3"/>
-                                            <TextBlock Text="  Stops FontCache svc briefly" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
-
-                                            <CheckBox x:Name="ChkBoostBrowser"  Content="Browser Caches"                 Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
-                                            <TextBlock Text="  Chrome, Edge, Firefox caches" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
-
                                             <CheckBox x:Name="ChkBoostWER"      Content="Windows Error Reports"          Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
                                             <TextBlock Text="  WER ReportArchive + ReportQueue" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
                                             <CheckBox x:Name="ChkBoostDelivOpt" Content="Delivery Optimization Cache"    Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
                                             <TextBlock Text="  Windows update delivery cache" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
-                                            <CheckBox x:Name="ChkBoostRecycle"  Content="Empty Recycle Bin"              Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="False" Margin="0,3"/>
-                                            <TextBlock Text="  Permanently delete Recycle Bin" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+                                            <CheckBox x:Name="ChkBoostTRIM"     Content="SSD TRIM Optimization"          Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  Optimize-Volume -ReTrim (SSD only)" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
                                             <Border Background="{DynamicResource BorderBrush}" Height="1" Margin="0,6"/>
 
-                                            <CheckBox x:Name="ChkBoostEventLogs" Content="Clear Event Logs (Optional)" Foreground="#F59E0B" FontSize="12" IsChecked="False" Margin="0,3"/>
+                                            <CheckBox x:Name="ChkBoostPower"    Content="Turbo High-Performance Plan"    Foreground="{DynamicResource AccentCyan}" FontSize="12" IsChecked="False" Margin="0,3"/>
+                                            <TextBlock Text="  Switch Balanced -> High Performance" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostFont"     Content="Font Cache"                     Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="False" Margin="0,3"/>
+                                            <TextBlock Text="  Stops FontCache svc briefly" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostRecycle"  Content="Empty Recycle Bin"              Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="False" Margin="0,3"/>
+                                            <TextBlock Text="  Permanently delete Recycle Bin" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostDISM"     Content="DISM WinSxS Component Clean"    Foreground="#F59E0B" FontSize="12" IsChecked="False" Margin="0,3"/>
+                                            <TextBlock Text="  Official Windows Update backup trim (20-60s)" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostEventLogs" Content="Clear Event Logs (Optional)"    Foreground="#F59E0B" FontSize="12" IsChecked="False" Margin="0,3"/>
                                             <TextBlock Text="  Clears App/System/Security logs" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
                                         </StackPanel>
                                     </ScrollViewer>
@@ -3009,17 +3241,23 @@ function Invoke-BoostWithUI {
     $doThumb  = $Controls['ChkBoostThumb'].IsChecked
     $doFont   = $Controls['ChkBoostFont'].IsChecked
     $doBrowse = $Controls['ChkBoostBrowser'].IsChecked
+    $doGPU    = $Controls['ChkBoostGPU'].IsChecked
+    $doUWP    = $Controls['ChkBoostUWP'].IsChecked
     $doWER    = $Controls['ChkBoostWER'].IsChecked
     $doDO     = $Controls['ChkBoostDelivOpt'].IsChecked
+    $doTRIM   = $Controls['ChkBoostTRIM'].IsChecked
+    $doPower  = $Controls['ChkBoostPower'].IsChecked
     $doRBin   = $Controls['ChkBoostRecycle'].IsChecked
+    $doDISM   = $Controls['ChkBoostDISM'].IsChecked
     $doEvt    = $Controls['ChkBoostEventLogs'].IsChecked
 
     $result = $null
     try {
         $result = Invoke-PCSpeedBoost -DryRun $DryRun -DoRAM $doRAM -DoWinTemp $doTemp `
             -DoPrefetch $doPref -DoDNS $doDNS -DoWUCache $doWU -DoThumbnail $doThumb `
-            -DoFontCache $doFont -DoBrowserCache $doBrowse -DoWER $doWER `
-            -DoDelivOpt $doDO -DoRecycleBin $doRBin -DoEventLogs $doEvt
+            -DoFontCache $doFont -DoBrowserCache $doBrowse -DoGPUCache $doGPU -DoUWPCache $doUWP `
+            -DoWER $doWER -DoDelivOpt $doDO -DoSSDTrim $doTRIM -DoPowerPlan $doPower `
+            -DoRecycleBin $doRBin -DoDISMClean $doDISM -DoEventLogs $doEvt
     } catch {
         Write-BoostLog "ERROR: $_" "ERROR"
     }
