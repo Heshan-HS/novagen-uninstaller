@@ -53,6 +53,38 @@ public class NovaGenNative {
     public static bool ScheduleDeleteOnReboot(string path) {
         return MoveFileEx(path, null, MoveFileFlags.MOVEFILE_DELAY_UNTIL_REBOOT);
     }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    public class MEMORYSTATUSEX {
+        public uint dwLength;
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys;
+        public ulong ullAvailPhys;
+        public ulong ullTotalPageFile;
+        public ulong ullAvailPageFile;
+        public ulong ullTotalVirtual;
+        public ulong ullAvailVirtual;
+        public ulong ullAvailExtendedVirtual;
+        public MEMORYSTATUSEX() {
+            this.dwLength = (uint)Marshal.SizeOf(typeof(MEMORYSTATUSEX));
+        }
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GlobalMemoryStatusEx([In, Out] MEMORYSTATUSEX lpBuffer);
+
+    [DllImport("psapi.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool EmptyWorkingSet(IntPtr hProcess);
+
+    public static ulong[] GetMemorySnapshot() {
+        MEMORYSTATUSEX mem = new MEMORYSTATUSEX();
+        if (GlobalMemoryStatusEx(mem)) {
+            return new ulong[] { mem.dwMemoryLoad, mem.ullTotalPhys, mem.ullAvailPhys };
+        }
+        return new ulong[] { 0, 0, 0 };
+    }
 }
 "@
 try {
@@ -1134,15 +1166,82 @@ function Compare-SystemInstallSnapshot {
 
 $Script:BoostLog = New-Object System.Collections.Generic.List[string]
 
+function Invoke-BoostUiPump {
+    try {
+        $frame = New-Object System.Windows.Threading.DispatcherFrame
+        $Window.Dispatcher.BeginInvoke(
+            [System.Windows.Threading.DispatcherPriority]::Background,
+            [System.Threading.DispatcherOperationCallback]{ param($f); $f.Continue = $false; return $null },
+            $frame
+        ) | Out-Null
+        [System.Windows.Threading.Dispatcher]::PushFrame($frame)
+    } catch {}
+}
+
+function Set-BoostRingProgress {
+    param(
+        [double]$Percent,
+        [string]$RingLabel = "PROGRESS",
+        [string]$ActiveStep = "",
+        [string]$AccentHex = ""
+    )
+    $p = [Math]::Max(0, [Math]::Min(100, $Percent))
+    try {
+        if ($p -le 0.1) {
+            $Controls['BoostRingArc'].Data = $null
+        } elseif ($p -ge 99.9) {
+            $Controls['BoostRingArc'].Data = [System.Windows.Media.Geometry]::Parse("M 62,5 A 57,57 0 1 1 62,119 A 57,57 0 1 1 62,5")
+        } else {
+            $rad = ($p / 100.0) * 2.0 * [Math]::PI
+            $x = [Math]::Round(62.0 + 57.0 * [Math]::Sin($rad), 2)
+            $y = [Math]::Round(62.0 - 57.0 * [Math]::Cos($rad), 2)
+            $large = if ($p -gt 50.0) { 1 } else { 0 }
+            $inv = [System.Globalization.CultureInfo]::InvariantCulture
+            $pathStr = [string]::Format($inv, "M 62,5 A 57,57 0 {0} 1 {1},{2}", $large, $x, $y)
+            $Controls['BoostRingArc'].Data = [System.Windows.Media.Geometry]::Parse($pathStr)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($AccentHex)) {
+            $Controls['BoostRingArc'].Stroke = (New-Object System.Windows.Media.BrushConverter).ConvertFromString($AccentHex)
+        }
+        $Controls['TxtBoostRingPercent'].Text = "$([int][Math]::Round($p))%"
+        $Controls['TxtBoostRingLabel'].Text   = $RingLabel
+        $Controls['PbBoostProgress'].Value    = $p
+        if (-not [string]::IsNullOrWhiteSpace($ActiveStep)) {
+            $Controls['TxtBoostActiveStep'].Text = $ActiveStep
+        }
+    } catch {}
+    Invoke-BoostUiPump
+}
+
+function Update-BoostRamTelemetry {
+    param([bool]$UpdateRing = $true)
+    try {
+        $snap = [NovaGenNative]::GetMemorySnapshot()
+        if ($snap -and $snap[1] -gt 0) {
+            $loadPct = [int]$snap[0]
+            $totalGB = [Math]::Round($snap[1] / 1GB, 1)
+            $availGB = [Math]::Round($snap[2] / 1GB, 1)
+            $usedGB  = [Math]::Round(($snap[1] - $snap[2]) / 1GB, 1)
+            $Controls['TxtBoostSysRAM'].Text = "$usedGB / $totalGB GB ($loadPct%)"
+            if ($UpdateRing) {
+                $ringColor = if ($loadPct -ge 85) { "#EF4444" } elseif ($loadPct -ge 65) { "#F59E0B" } else { "#06B6D4" }
+                Set-BoostRingProgress -Percent $loadPct -RingLabel "RAM USED" -ActiveStep "System RAM: $usedGB GB used, $availGB GB free — Ready to optimize" -AccentHex $ringColor
+            }
+        }
+    } catch {}
+}
+
 function Write-BoostLog {
     param([string]$Message, [string]$Level = "INFO")
     $ts = Get-Date -Format "HH:mm:ss"
     $line = "[$ts] [$Level] $Message"
     $Script:BoostLog.Add($line)
-    $Window.Dispatcher.InvokeAsync([action]{
-        $Controls['TxtBoostLog'].AppendText($line + "`n")
+    try {
+        $Controls['TxtBoostLog'].AppendText($line + "`r`n")
+        $Controls['TxtBoostLog'].CaretIndex = $Controls['TxtBoostLog'].Text.Length
         $Controls['TxtBoostLog'].ScrollToEnd()
-    }) | Out-Null
+    } catch {}
+    Invoke-BoostUiPump
 }
 
 function Get-BoostCategorySize {
@@ -1216,6 +1315,15 @@ function Invoke-PCSpeedBoost {
 
     $Script:BoostLog.Clear()
     $mode = if ($DryRun) { "ANALYZE (DRY-RUN)" } else { "BOOST NOW" }
+    $ringLabel = if ($DryRun) { "ANALYZING" } else { "BOOSTING" }
+    $ringHex   = if ($DryRun) { "#06B6D4" } else { "#22C55E" }
+
+    $enabledFlags = @($DoRAM, $DoWinTemp, $DoPrefetch, $DoDNS, $DoWUCache, $DoThumbnail, $DoFontCache, $DoBrowserCache, $DoWER, $DoDelivOpt, $DoRecycleBin, $DoEventLogs)
+    $totalSteps = ($enabledFlags | Where-Object { $_ -eq $true }).Count
+    if ($totalSteps -le 0) { $totalSteps = 1 }
+    $stepIdx = 0
+
+    Set-BoostRingProgress -Percent 2 -RingLabel $ringLabel -ActiveStep "Initializing NovaGen PC Speed Boost Engine..." -AccentHex $ringHex
     Write-BoostLog "======================================================" "INFO"
     Write-BoostLog "NovaGen PC Speed Boost Engine — MODE: $mode" "INFO"
     Write-BoostLog "======================================================" "INFO"
@@ -1225,35 +1333,42 @@ function Invoke-PCSpeedBoost {
 
     # ---- 1. RAM / Working Set Flush ----
     if ($DoRAM) {
-        Write-BoostLog "RAM Flush: Triggering .NET GC collection..." "INFO"
+        $stepIdx++
+        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Flushing RAM & Process Working Sets..." -AccentHex $ringHex
+        Write-BoostLog "RAM Flush: Measuring system physical memory..." "INFO"
+        $memBefore = [NovaGenNative]::GetMemorySnapshot()
         if (-not $DryRun) {
             [System.GC]::Collect()
             [System.GC]::WaitForPendingFinalizers()
-            [System.GC]::Collect()
-            $before = [System.GC]::GetTotalMemory($false)
             [System.GC]::Collect(2, [System.GCCollectionMode]::Forced, $true, $true)
-            $after = [System.GC]::GetTotalMemory($true)
-            $ramFreedMB = [Math]::Max(0, [int](($before - $after) / 1MB))
-            Write-BoostLog "RAM Flush: .NET GC freed approx $ramFreedMB MB managed heap." "OK"
-            # Flush working sets of processes (safe — Windows will re-page on demand)
             $flushed = 0
-            Get-Process -ErrorAction SilentlyContinue | ForEach-Object {
+            foreach ($proc in (Get-Process -ErrorAction SilentlyContinue)) {
                 try {
-                    $_.MinWorkingSet = $_.MinWorkingSet
-                    $flushed++
+                    if ($proc.Handle -ne [IntPtr]::Zero) {
+                        if ([NovaGenNative]::EmptyWorkingSet($proc.Handle)) { $flushed++ }
+                    }
                 } catch {}
             }
-            Write-BoostLog "RAM Flush: Soft-trimmed working sets of $flushed processes." "OK"
+            Start-Sleep -Milliseconds 350
+            $memAfter = [NovaGenNative]::GetMemorySnapshot()
+            $diffBytes = [int64]$memAfter[2] - [int64]$memBefore[2]
+            $ramFreedMB = if ($diffBytes -gt 0) { [int][Math]::Round($diffBytes / 1MB) } else { 0 }
+            $Controls['TxtBoostRAM'].Text = "$ramFreedMB MB"
+            Update-BoostRamTelemetry -UpdateRing $false
+            Write-BoostLog "RAM Flush: Trimmed $flushed processes — $ramFreedMB MB physical RAM reclaimed!" "OK"
         } else {
-            $ramFreedMB = 50  # Estimated
-            Write-BoostLog "RAM Flush: Would flush .NET GC + trim process working sets. (Dry Run)" "DRY"
+            $usedMB = [int][Math]::Round(($memBefore[1] - $memBefore[2]) / 1MB)
+            $ramFreedMB = [Math]::Max(32, [int][Math]::Round($usedMB * 0.08))
+            $Controls['TxtBoostRAM'].Text = "~$ramFreedMB MB"
+            Write-BoostLog "RAM Flush: Would trim idle process working sets (~$ramFreedMB MB est.). (Dry Run)" "DRY"
         }
     }
 
     # ---- 2. Windows Temp Files ----
     if ($DoWinTemp) {
-        $tempPaths = @("$env:SystemRoot\Temp", "$env:TEMP", "$env:TMP",
-                       "$env:LOCALAPPDATA\Temp")
+        $stepIdx++
+        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Windows Temp Files..." -AccentHex $ringHex
+        $tempPaths = @("$env:SystemRoot\Temp", "$env:TEMP", "$env:TMP", "$env:LOCALAPPDATA\Temp")
         $catFreed = [int64]0
         foreach ($tp in ($tempPaths | Select-Object -Unique)) {
             if (Test-Path $tp) {
@@ -1263,11 +1378,15 @@ function Invoke-PCSpeedBoost {
             }
         }
         $totalFreed += $catFreed
+        $Controls['TxtBoostEstimate'].Text = Format-ByteSize $totalFreed
+        if (-not $DryRun) { $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed }
         Write-BoostLog "Windows Temp: $(Format-ByteSize $catFreed) $(if($DryRun){'would be freed'}else{'freed'})." "OK"
     }
 
     # ---- 3. Prefetch Files ----
     if ($DoPrefetch) {
+        $stepIdx++
+        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Windows Prefetch..." -AccentHex $ringHex
         $pfPath = "$env:SystemRoot\Prefetch"
         if (Test-Path $pfPath) {
             $sz = Get-DirectorySizeFast $pfPath
@@ -1275,16 +1394,20 @@ function Invoke-PCSpeedBoost {
             if (-not $DryRun) {
                 $freed = Invoke-BoostCleanPath -Path $pfPath -DryRun $false -Label "Prefetch"
                 $totalFreed += $freed
+                $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed
                 Write-BoostLog "Prefetch: $(Format-ByteSize $freed) freed. Windows will rebuild automatically." "OK"
             } else {
                 $totalFreed += $sz
                 Write-BoostLog "Prefetch: $(Format-ByteSize $sz) would be freed. (Dry Run)" "DRY"
             }
+            $Controls['TxtBoostEstimate'].Text = Format-ByteSize $totalFreed
         }
     }
 
     # ---- 4. DNS Cache Flush ----
     if ($DoDNS) {
+        $stepIdx++
+        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Flushing DNS Resolver Cache..." -AccentHex $ringHex
         if (-not $DryRun) {
             try {
                 & ipconfig /flushdns 2>&1 | Out-Null
@@ -1299,27 +1422,33 @@ function Invoke-PCSpeedBoost {
 
     # ---- 5. Windows Update Download Cache ----
     if ($DoWUCache) {
+        $stepIdx++
+        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Checking Windows Update Cache..." -AccentHex $ringHex
         $wuPath = "$env:SystemRoot\SoftwareDistribution\Download"
         if (Test-Path $wuPath) {
             $sz = Get-DirectorySizeFast $wuPath
             Write-BoostLog "WU Cache [$wuPath]: $(Format-ByteSize $sz) found." "INFO"
             if (-not $DryRun) {
                 try { Stop-Service -Name "wuauserv" -Force -ErrorAction SilentlyContinue } catch {}
-                Start-Sleep -Milliseconds 1500
+                Start-Sleep -Milliseconds 1200
                 $freed = Invoke-BoostCleanPath -Path $wuPath -DryRun $false -Label "WUCache"
                 $totalFreed += $freed
-                Start-Sleep -Milliseconds 500
+                $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed
+                Start-Sleep -Milliseconds 400
                 try { Start-Service -Name "wuauserv" -ErrorAction SilentlyContinue } catch {}
                 Write-BoostLog "WU Cache: $(Format-ByteSize $freed) freed (wuauserv restarted)." "OK"
             } else {
                 $totalFreed += $sz
                 Write-BoostLog "WU Cache: $(Format-ByteSize $sz) would be freed. (Dry Run)" "DRY"
             }
+            $Controls['TxtBoostEstimate'].Text = Format-ByteSize $totalFreed
         }
     }
 
     # ---- 6. Thumbnail Cache ----
     if ($DoThumbnail) {
+        $stepIdx++
+        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Thumbnail Cache..." -AccentHex $ringHex
         $thumbPath = "$env:LOCALAPPDATA\Microsoft\Windows\Explorer"
         if (Test-Path $thumbPath) {
             $thumbFiles = Get-ChildItem -LiteralPath $thumbPath -Filter "thumbcache_*.db" -Force -ErrorAction SilentlyContinue
@@ -1335,16 +1464,20 @@ function Invoke-PCSpeedBoost {
                     } catch {}
                 }
                 $totalFreed += $freed
-                Write-BoostLog "Thumbnail Cache: $(Format-ByteSize $freed) freed (Windows will rebuild on next Explorer open)." "OK"
+                $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed
+                Write-BoostLog "Thumbnail Cache: $(Format-ByteSize $freed) freed (auto-rebuilds)." "OK"
             } else {
                 $totalFreed += $sz
                 Write-BoostLog "Thumbnail Cache: $(Format-ByteSize $sz) would be freed. (Dry Run)" "DRY"
             }
+            $Controls['TxtBoostEstimate'].Text = Format-ByteSize $totalFreed
         }
     }
 
     # ---- 7. Font Cache ----
     if ($DoFontCache) {
+        $stepIdx++
+        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Checking Font Cache..." -AccentHex $ringHex
         $fontPath = "$env:SystemRoot\ServiceProfiles\LocalService\AppData\Local\FontCache"
         if (Test-Path $fontPath) {
             $sz = Get-DirectorySizeFast $fontPath
@@ -1354,17 +1487,21 @@ function Invoke-PCSpeedBoost {
                 Start-Sleep -Milliseconds 1000
                 $freed = Invoke-BoostCleanPath -Path $fontPath -DryRun $false -Label "FontCache"
                 $totalFreed += $freed
+                $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed
                 try { Start-Service -Name "FontCache" -ErrorAction SilentlyContinue } catch {}
                 Write-BoostLog "Font Cache: $(Format-ByteSize $freed) freed (FontCache service restarted)." "OK"
             } else {
                 $totalFreed += $sz
                 Write-BoostLog "Font Cache: $(Format-ByteSize $sz) would be freed. (Dry Run)" "DRY"
             }
+            $Controls['TxtBoostEstimate'].Text = Format-ByteSize $totalFreed
         }
     }
 
     # ---- 8. Browser Caches ----
     if ($DoBrowserCache) {
+        $stepIdx++
+        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Browser Caches..." -AccentHex $ringHex
         $browserPaths = @(
             @{ Name = "Chrome Cache";      Path = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Cache" },
             @{ Name = "Chrome Code Cache"; Path = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Code Cache" },
@@ -1381,11 +1518,15 @@ function Invoke-PCSpeedBoost {
             }
         }
         $totalFreed += $catFreed
+        $Controls['TxtBoostEstimate'].Text = Format-ByteSize $totalFreed
+        if (-not $DryRun) { $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed }
         Write-BoostLog "Browser Caches: $(Format-ByteSize $catFreed) $(if($DryRun){'would be freed'}else{'freed'})." "OK"
     }
 
     # ---- 9. Windows Error Reporting ----
     if ($DoWER) {
+        $stepIdx++
+        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Scanning Windows Error Reports..." -AccentHex $ringHex
         $werPaths = @("$env:ProgramData\Microsoft\Windows\WER\ReportArchive",
                       "$env:ProgramData\Microsoft\Windows\WER\ReportQueue",
                       "$env:LOCALAPPDATA\Microsoft\Windows\WER\ReportArchive",
@@ -1393,16 +1534,19 @@ function Invoke-PCSpeedBoost {
         $catFreed = [int64]0
         foreach ($wp in $werPaths) {
             if (Test-Path $wp) {
-                $sz = Get-DirectorySizeFast $wp
                 $catFreed += Invoke-BoostCleanPath -Path $wp -DryRun $DryRun -Label "WER"
             }
         }
         $totalFreed += $catFreed
+        $Controls['TxtBoostEstimate'].Text = Format-ByteSize $totalFreed
+        if (-not $DryRun) { $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed }
         Write-BoostLog "Windows Error Reports: $(Format-ByteSize $catFreed) $(if($DryRun){'would be freed'}else{'freed'})." "OK"
     }
 
     # ---- 10. Delivery Optimization Cache ----
     if ($DoDelivOpt) {
+        $stepIdx++
+        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Checking Delivery Optimization..." -AccentHex $ringHex
         $doPath = "$env:SystemRoot\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache"
         if (Test-Path $doPath) {
             $sz = Get-DirectorySizeFast $doPath
@@ -1410,16 +1554,20 @@ function Invoke-PCSpeedBoost {
             if (-not $DryRun) {
                 $freed = Invoke-BoostCleanPath -Path $doPath -DryRun $false -Label "DelivOpt"
                 $totalFreed += $freed
+                $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed
                 Write-BoostLog "Delivery Optimization: $(Format-ByteSize $freed) freed." "OK"
             } else {
                 $totalFreed += $sz
                 Write-BoostLog "Delivery Optimization: $(Format-ByteSize $sz) would be freed. (Dry Run)" "DRY"
             }
+            $Controls['TxtBoostEstimate'].Text = Format-ByteSize $totalFreed
         }
     }
 
     # ---- 11. Recycle Bin ----
     if ($DoRecycleBin) {
+        $stepIdx++
+        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Checking Recycle Bin..." -AccentHex $ringHex
         try {
             if (-not $DryRun) {
                 Clear-RecycleBin -Force -ErrorAction SilentlyContinue
@@ -1434,6 +1582,8 @@ function Invoke-PCSpeedBoost {
 
     # ---- 12. Event Logs (Optional — user must opt-in) ----
     if ($DoEventLogs) {
+        $stepIdx++
+        Set-BoostRingProgress -Percent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Processing Event Logs..." -AccentHex $ringHex
         $logs = @("Application", "System", "Security", "Setup")
         if (-not $DryRun) {
             foreach ($logName in $logs) {
@@ -1450,11 +1600,14 @@ function Invoke-PCSpeedBoost {
     }
 
     # ---- FINAL SUMMARY ----
+    $doneLabel = if ($DryRun) { "ANALYZED" } else { "OPTIMIZED" }
+    $doneStep  = if ($DryRun) { "Analyze Complete — $(Format-ByteSize $totalFreed) disk + ~$ramFreedMB MB RAM ready to clean" } else { "Boost Complete — $(Format-ByteSize $totalFreed) disk freed + $ramFreedMB MB RAM reclaimed!" }
+    Set-BoostRingProgress -Percent 100 -RingLabel $doneLabel -ActiveStep $doneStep -AccentHex "#22C55E"
     Write-BoostLog "======================================================" "INFO"
     if ($DryRun) {
         Write-BoostLog "ANALYZE COMPLETE — Estimated savings: $(Format-ByteSize $totalFreed) disk + ~$ramFreedMB MB RAM" "OK"
     } else {
-        Write-BoostLog "BOOST COMPLETE — Disk freed: $(Format-ByteSize $totalFreed) | RAM flushed: ~$ramFreedMB MB" "OK"
+        Write-BoostLog "BOOST COMPLETE — Disk freed: $(Format-ByteSize $totalFreed) | RAM flushed: $ramFreedMB MB" "OK"
     }
     Write-BoostLog "======================================================" "INFO"
 
@@ -2160,110 +2313,166 @@ function Invoke-PCSpeedBoost {
                         <!-- Header -->
                         <StackPanel Grid.Row="0" Margin="0,0,0,10">
                             <TextBlock Text="PC SPEED BOOST ENGINE (ULTRA-ADVANCED SAFE OPTIMIZER)" Foreground="{DynamicResource PrimaryInk}" FontSize="13" FontWeight="Bold"/>
-                            <TextBlock Text="Safely clean RAM, temp files, caches and junk. Analyze first (dry-run) then Boost. Zero risk to OS or user data."
+                            <TextBlock Text="Live RAM telemetry, circular optimization gauge &amp; 12-point deep cache cleaner. Analyze first or Boost Now."
                                        Foreground="{DynamicResource MutedInk}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
                         </StackPanel>
 
-                        <!-- Telemetry Before/After Bar -->
-                        <Border Grid.Row="1" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,10">
+                        <!-- Hero Telemetry + Circular Progress Ring -->
+                        <Border Grid.Row="1" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14" Margin="0,0,0,10">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0" HorizontalAlignment="Center">
-                                    <TextBlock Text="ESTIMATED SAVINGS" Foreground="{DynamicResource MutedInk}" FontSize="9" FontWeight="Bold" HorizontalAlignment="Center"/>
-                                    <TextBlock x:Name="TxtBoostEstimate" Text="— Run Analyze —" Foreground="{DynamicResource AccentCyan}" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
-                                </StackPanel>
-                                <StackPanel Grid.Column="1" HorizontalAlignment="Center">
-                                    <TextBlock Text="RAM FREED" Foreground="{DynamicResource MutedInk}" FontSize="9" FontWeight="Bold" HorizontalAlignment="Center"/>
-                                    <TextBlock x:Name="TxtBoostRAM" Text="—" Foreground="{DynamicResource AccentCyan}" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
-                                </StackPanel>
-                                <StackPanel Grid.Column="2" HorizontalAlignment="Center">
-                                    <TextBlock Text="DISK FREED" Foreground="{DynamicResource MutedInk}" FontSize="9" FontWeight="Bold" HorizontalAlignment="Center"/>
-                                    <TextBlock x:Name="TxtBoostDisk" Text="—" Foreground="{DynamicResource AccentCyan}" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
-                                </StackPanel>
-                                <StackPanel Grid.Column="3" HorizontalAlignment="Center">
-                                    <TextBlock Text="STATUS" Foreground="{DynamicResource MutedInk}" FontSize="9" FontWeight="Bold" HorizontalAlignment="Center"/>
-                                    <TextBlock x:Name="TxtBoostStatus" Text="READY" Foreground="#22C55E" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
-                                </StackPanel>
+
+                                <!-- Circular Progress / Health Ring -->
+                                <Grid Grid.Column="0" Width="124" Height="124" Margin="0,0,18,0" VerticalAlignment="Center">
+                                    <Ellipse Width="124" Height="124" Stroke="{DynamicResource BorderBrush}" StrokeThickness="9"/>
+                                    <Path x:Name="BoostRingArc" Width="124" Height="124" Stroke="{DynamicResource AccentCyan}" StrokeThickness="9"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M 62,5 A 57,57 0 0 1 62,5"/>
+                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                        <TextBlock x:Name="TxtBoostRingPercent" Text="0%" Foreground="{DynamicResource PrimaryInk}" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtBoostRingLabel" Text="RAM USED" Foreground="{DynamicResource MutedInk}" FontSize="9" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,1,0,0"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- Right Side: Live Step, Progress Bar & 4 Metric Cards -->
+                                <Grid Grid.Column="1" VerticalAlignment="Center">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <Grid Grid.Row="0" Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock x:Name="TxtBoostActiveStep" Grid.Column="0" Text="Ready — Click Analyze or Boost Now to start live scan"
+                                                   Foreground="{DynamicResource SecondaryInk}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtBoostStatus" Grid.Column="1" Text="READY" Foreground="#22C55E" FontSize="12" FontWeight="Bold" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                                    </Grid>
+
+                                    <ProgressBar x:Name="PbBoostProgress" Grid.Row="1" Height="6" Minimum="0" Maximum="100" Value="0"
+                                                 Background="{DynamicResource BorderBrush}" Foreground="{DynamicResource AccentCyan}" BorderThickness="0" Margin="0,0,0,12"/>
+
+                                    <Grid Grid.Row="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border Grid.Column="0" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,6,0">
+                                            <StackPanel>
+                                                <TextBlock Text="SYSTEM RAM" Foreground="{DynamicResource MutedInk}" FontSize="9" FontWeight="Bold"/>
+                                                <TextBlock x:Name="TxtBoostSysRAM" Text="—" Foreground="{DynamicResource PrimaryInk}" FontSize="13" FontWeight="Bold" Margin="0,2,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Grid.Column="1" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,6,0">
+                                            <StackPanel>
+                                                <TextBlock Text="ESTIMATED SAVINGS" Foreground="{DynamicResource MutedInk}" FontSize="9" FontWeight="Bold"/>
+                                                <TextBlock x:Name="TxtBoostEstimate" Text="—" Foreground="{DynamicResource AccentCyan}" FontSize="13" FontWeight="Bold" Margin="0,2,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Grid.Column="2" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,6,0">
+                                            <StackPanel>
+                                                <TextBlock Text="RAM FREED" Foreground="{DynamicResource MutedInk}" FontSize="9" FontWeight="Bold"/>
+                                                <TextBlock x:Name="TxtBoostRAM" Text="0 MB" Foreground="#22C55E" FontSize="13" FontWeight="Bold" Margin="0,2,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Grid.Column="3" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8,6">
+                                            <StackPanel>
+                                                <TextBlock Text="DISK FREED" Foreground="{DynamicResource MutedInk}" FontSize="9" FontWeight="Bold"/>
+                                                <TextBlock x:Name="TxtBoostDisk" Text="0 KB" Foreground="#22C55E" FontSize="13" FontWeight="Bold" Margin="0,2,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </Grid>
                             </Grid>
                         </Border>
 
-                        <!-- Main Content: Options + Log -->
+                        <!-- Main Content: Scrollable Options + Live Log -->
                         <Grid Grid.Row="2">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="260"/>
+                                <ColumnDefinition Width="270"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
 
-                            <!-- Left: Boost Option Checkboxes -->
-                            <Border Grid.Column="0" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,8,0">
-                                <StackPanel>
-                                    <TextBlock Text="BOOST OPERATIONS" Foreground="{DynamicResource AccentCyan}" FontSize="10" FontWeight="Bold" Margin="0,0,0,8"/>
+                            <!-- Left: Scrollable Boost Option Checkboxes -->
+                            <Border Grid.Column="0" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,8,0">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Text="BOOST OPERATIONS (12 MODULES)" Foreground="{DynamicResource AccentCyan}" FontSize="10" FontWeight="Bold" Margin="2,0,0,6"/>
+                                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,4,0">
+                                        <StackPanel>
+                                            <CheckBox x:Name="ChkBoostRAM"      Content="RAM / Working Set Flush"       Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  Trim idle process memory + GC" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
-                                    <CheckBox x:Name="ChkBoostRAM"      Content="RAM / Working Set Flush"       Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
-                                    <TextBlock Text="  Flush .NET GC + trim process memory" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+                                            <CheckBox x:Name="ChkBoostWinTemp"  Content="Windows Temp Files"             Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  %TEMP%, %TMP%, C:\Windows\Temp" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
-                                    <CheckBox x:Name="ChkBoostWinTemp"  Content="Windows Temp Files"             Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
-                                    <TextBlock Text="  %TEMP%, %TMP%, C:\Windows\Temp" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+                                            <CheckBox x:Name="ChkBoostPrefetch" Content="Prefetch Files"                 Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  C:\Windows\Prefetch (auto-rebuild)" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
-                                    <CheckBox x:Name="ChkBoostPrefetch" Content="Prefetch Files"                 Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
-                                    <TextBlock Text="  C:\Windows\Prefetch (auto-rebuild)" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+                                            <CheckBox x:Name="ChkBoostDNS"      Content="DNS Cache"                      Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  ipconfig /flushdns (instant)" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
-                                    <CheckBox x:Name="ChkBoostDNS"      Content="DNS Cache"                      Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
-                                    <TextBlock Text="  ipconfig /flushdns (instant)" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+                                            <CheckBox x:Name="ChkBoostWU"       Content="Windows Update Cache"           Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  SoftwareDistribution\Download only" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
-                                    <CheckBox x:Name="ChkBoostWU"       Content="Windows Update Cache"           Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
-                                    <TextBlock Text="  SoftwareDistribution\Download only" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+                                            <CheckBox x:Name="ChkBoostThumb"    Content="Thumbnail Cache"                Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  Explorer thumbcache_*.db files" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
-                                    <CheckBox x:Name="ChkBoostThumb"    Content="Thumbnail Cache"                Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
-                                    <TextBlock Text="  Explorer thumbcache_*.db files" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+                                            <CheckBox x:Name="ChkBoostFont"     Content="Font Cache"                     Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="False" Margin="0,3"/>
+                                            <TextBlock Text="  Stops FontCache svc briefly" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
-                                    <CheckBox x:Name="ChkBoostFont"     Content="Font Cache"                     Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="False" Margin="0,3"/>
-                                    <TextBlock Text="  Stops FontCache svc briefly" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+                                            <CheckBox x:Name="ChkBoostBrowser"  Content="Browser Caches"                 Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  Chrome, Edge, Firefox caches" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
-                                    <CheckBox x:Name="ChkBoostBrowser"  Content="Browser Caches"                 Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
-                                    <TextBlock Text="  Chrome, Edge, Firefox caches" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+                                            <CheckBox x:Name="ChkBoostWER"      Content="Windows Error Reports"          Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  WER ReportArchive + ReportQueue" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
-                                    <CheckBox x:Name="ChkBoostWER"      Content="Windows Error Reports"          Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
-                                    <TextBlock Text="  WER ReportArchive + ReportQueue" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+                                            <CheckBox x:Name="ChkBoostDelivOpt" Content="Delivery Optimization Cache"    Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  Windows update delivery cache" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
-                                    <CheckBox x:Name="ChkBoostDelivOpt" Content="Delivery Optimization Cache"    Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
-                                    <TextBlock Text="  Windows update delivery cache" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+                                            <CheckBox x:Name="ChkBoostRecycle"  Content="Empty Recycle Bin"              Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="False" Margin="0,3"/>
+                                            <TextBlock Text="  Permanently delete Recycle Bin" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
 
-                                    <CheckBox x:Name="ChkBoostRecycle"  Content="Empty Recycle Bin"              Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="False" Margin="0,3"/>
-                                    <TextBlock Text="  Permanently delete Recycle Bin" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+                                            <Border Background="{DynamicResource BorderBrush}" Height="1" Margin="0,6"/>
 
-                                    <Border Background="{DynamicResource BorderBrush}" Height="1" Margin="0,8"/>
-
-                                    <CheckBox x:Name="ChkBoostEventLogs" Content="⚠ Clear Event Logs (Optional)" Foreground="#F59E0B" FontSize="12" IsChecked="False" Margin="0,3"/>
-                                    <TextBlock Text="  Clears App/System/Security logs" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
-                                </StackPanel>
+                                            <CheckBox x:Name="ChkBoostEventLogs" Content="Clear Event Logs (Optional)" Foreground="#F59E0B" FontSize="12" IsChecked="False" Margin="0,3"/>
+                                            <TextBlock Text="  Clears App/System/Security logs" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </Grid>
                             </Border>
 
-                            <!-- Right: Real-time Log Output -->
+                            <!-- Right: Live Real-time Log Output -->
                             <Border Grid.Column="1" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
                                 <Grid>
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="*"/>
                                     </Grid.RowDefinitions>
-                                    <TextBlock Grid.Row="0" Text="BOOST ENGINE LOG" Foreground="{DynamicResource AccentCyan}" FontSize="10" FontWeight="Bold" Margin="0,0,0,6"/>
-                                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                                        <TextBox x:Name="TxtBoostLog"
-                                                 Background="Transparent"
-                                                 Foreground="{DynamicResource SecondaryInk}"
-                                                 BorderThickness="0"
-                                                 FontFamily="Consolas"
-                                                 FontSize="11"
-                                                 IsReadOnly="True"
-                                                 TextWrapping="Wrap"
-                                                 AcceptsReturn="True"
-                                                 Text="[Boost Engine] Ready. Select operations and click Analyze or Boost Now.&#x0a;"/>
-                                    </ScrollViewer>
+                                    <TextBlock Grid.Row="0" Text="LIVE BOOST ENGINE LOG" Foreground="{DynamicResource AccentCyan}" FontSize="10" FontWeight="Bold" Margin="0,0,0,6"/>
+                                    <TextBox x:Name="TxtBoostLog" Grid.Row="1"
+                                             Background="Transparent"
+                                             Foreground="{DynamicResource PrimaryInk}"
+                                             BorderThickness="0"
+                                             FontFamily="Consolas"
+                                             FontSize="11.5"
+                                             IsReadOnly="True"
+                                             TextWrapping="Wrap"
+                                             AcceptsReturn="True"
+                                             VerticalScrollBarVisibility="Auto"
+                                             HorizontalScrollBarVisibility="Disabled"
+                                             VerticalContentAlignment="Top"
+                                             Text="[Boost Engine] Ready. Select operations and click Analyze or Boost Now.&#x0a;"/>
                                 </Grid>
                             </Border>
                         </Grid>
@@ -2491,6 +2700,7 @@ $Controls['NavBtnSnapshot'].Add_Click({
 
 $Controls['NavBtnBoost'].Add_Click({
     Switch-WorkspaceView 'ViewPCBoost'
+    Update-BoostRamTelemetry -UpdateRing $true
 })
 
 $Script:CurrentAppFilterCategory = "ALL"
@@ -2717,6 +2927,10 @@ function Invoke-BoostWithUI {
     $Controls['TxtBoostStatus'].Text       = if ($DryRun) { "ANALYZING..." } else { "BOOSTING..." }
     $Controls['TxtBoostStatus'].Foreground = [Windows.Media.Brushes]::Orange
     $Controls['TxtBoostLog'].Clear()
+    $Controls['TxtBoostDisk'].Text         = if ($DryRun) { "Scanning..." } else { "0 KB" }
+    $Controls['TxtBoostRAM'].Text          = if ($DryRun) { "Scanning..." } else { "0 MB" }
+    Update-BoostRamTelemetry -UpdateRing $false
+    Invoke-BoostUiPump
 
     $doRAM    = $Controls['ChkBoostRAM'].IsChecked
     $doTemp   = $Controls['ChkBoostWinTemp'].IsChecked
@@ -2743,12 +2957,16 @@ function Invoke-BoostWithUI {
 
     if ($result) {
         $diskStr = Format-ByteSize $result.TotalFreedBytes
-        $ramStr  = "$($result.RAMFreedMB) MB"
+        $ramStr  = if ($DryRun) { "~$($result.RAMFreedMB) MB" } else { "$($result.RAMFreedMB) MB" }
         $Controls['TxtBoostEstimate'].Text = $diskStr
-        $Controls['TxtBoostDisk'].Text     = $diskStr
+        $Controls['TxtBoostDisk'].Text     = if ($DryRun) { "0 KB (Dry Run)" } else { $diskStr }
         $Controls['TxtBoostRAM'].Text      = $ramStr
         $Controls['TxtBoostStatus'].Text   = if ($DryRun) { "ANALYZED" } else { "BOOSTED!" }
         $Controls['TxtBoostStatus'].Foreground = [Windows.Media.Brushes]::LimeGreen
+        if (-not $DryRun -and $result.TotalFreedBytes -gt 0) {
+            $Script:SessionReclaimedBytes += $result.TotalFreedBytes
+        }
+        Update-BoostRamTelemetry -UpdateRing $false
         Update-SystemTelemetry
     } else {
         $Controls['TxtBoostStatus'].Text   = "ERROR"
@@ -2757,6 +2975,7 @@ function Invoke-BoostWithUI {
 
     $Controls['BtnBoostAnalyze'].IsEnabled = $true
     $Controls['BtnBoostNow'].IsEnabled     = $true
+    Invoke-BoostUiPump
 }
 
 $Controls['BtnBoostAnalyze'].Add_Click({
