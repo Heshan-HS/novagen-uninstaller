@@ -41,12 +41,14 @@ Standard uninstallers often leave behind configuration files, license caches, re
 
 No Python, Node.js, or external runtime is required.
 
-1. Click **Code -> Download ZIP** (or clone this repository) and extract it to a folder.
-2. Double-click **`NovaGen.exe`** (or **`NovaGen-Uninstaller.bat`**).
-3. Click **Yes** on the Administrator (UAC) prompt to enable full system & registry access.
+### Option 1: One-Click Release Download (Recommended)
+1. Go to the **[Latest Release](https://github.com/Heshan-HS/novagen-uninstaller/releases/latest)** page and download **`NovaGen-Deep-Uninstaller-v4.2.zip`**.
+2. Extract the ZIP to any folder.
+3. Double-click **`NovaGen.exe`** (or **`NovaGen-Uninstaller.bat`**) and click **Yes** on the Administrator (UAC) prompt.
 
+### Option 2: Clone with Git
 ```powershell
-git clone https://github.com/YOUR_USERNAME/novagen-uninstaller.git
+git clone https://github.com/Heshan-HS/novagen-uninstaller.git
 cd novagen-uninstaller
 .\NovaGen.exe
 ```
