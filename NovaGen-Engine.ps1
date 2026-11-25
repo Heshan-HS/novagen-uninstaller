@@ -1237,6 +1237,15 @@ function Invoke-BoostUiPump {
     } catch {}
 }
 
+function Invoke-BoostUiWait {
+    param([int]$Ms = 200)
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($sw.ElapsedMilliseconds -lt $Ms) {
+        Invoke-BoostUiPump
+        Start-Sleep -Milliseconds 35
+    }
+}
+
 function Set-BoostRingProgress {
     param(
         [double]$Percent,
@@ -1460,9 +1469,9 @@ function Invoke-PCSpeedBoost {
                     }
                 } catch {}
             }
-            Start-Sleep -Milliseconds 250
+            Invoke-BoostUiWait -Ms 250
             $standbyOk = [NovaGenNative]::PurgeStandbyMemory()
-            Start-Sleep -Milliseconds 200
+            Invoke-BoostUiWait -Ms 200
             $memAfter = [NovaGenNative]::GetMemorySnapshot()
             $diffBytes = [int64]$memAfter[2] - [int64]$memBefore[2]
             $ramFreedMB = if ($diffBytes -gt 0) { [int][Math]::Round($diffBytes / 1MB) } else { 0 }
@@ -1564,11 +1573,11 @@ function Invoke-PCSpeedBoost {
             Write-BoostLog "WU Cache [$wuPath]: $(Format-ByteSize $sz) found." "INFO"
             if (-not $DryRun) {
                 try { Stop-Service -Name "wuauserv" -Force -ErrorAction SilentlyContinue } catch {}
-                Start-Sleep -Milliseconds 1200
+                Invoke-BoostUiWait -Ms 1200
                 $freed = Invoke-BoostCleanPath -Path $wuPath -DryRun $false -Label "WUCache"
                 $totalFreed += $freed
                 $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed
-                Start-Sleep -Milliseconds 400
+                Invoke-BoostUiWait -Ms 400
                 try { Start-Service -Name "wuauserv" -ErrorAction SilentlyContinue } catch {}
                 Write-BoostLog "WU Cache: $(Format-ByteSize $freed) freed (wuauserv restarted)." "OK"
             } else {
@@ -1618,7 +1627,7 @@ function Invoke-PCSpeedBoost {
             Write-BoostLog "Font Cache: $(Format-ByteSize $sz) found." "INFO"
             if (-not $DryRun) {
                 try { Stop-Service -Name "FontCache" -Force -ErrorAction SilentlyContinue } catch {}
-                Start-Sleep -Milliseconds 1000
+                Invoke-BoostUiWait -Ms 1000
                 $freed = Invoke-BoostCleanPath -Path $fontPath -DryRun $false -Label "FontCache"
                 $totalFreed += $freed
                 $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed
@@ -1842,21 +1851,44 @@ function Invoke-PCSpeedBoost {
         }
     }
 
-    # ---- 11B. DISM WinSxS Component Cleanup (Opt-In) ----
+    # ---- 11B. DISM WinSxS Component Cleanup (Opt-In, Non-Blocking Async) ----
     if ($DoDISMClean) {
         $stepIdx++
-        Animate-BoostRingTo -TargetPercent (($stepIdx / $totalSteps) * 95) -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Running DISM WinSxS Component Cleanup..." -AccentHex $ringHex
+        $basePct = ($stepIdx / $totalSteps) * 95
+        Animate-BoostRingTo -TargetPercent $basePct -RingLabel $ringLabel -ActiveStep "Step $stepIdx/$totalSteps : Running DISM WinSxS Cleanup..." -AccentHex $ringHex
         if (-not $DryRun) {
             try {
-                Write-BoostLog "DISM WinSxS: Cleaning superseded Windows Update backups (please wait)..." "INFO"
+                Write-BoostLog "DISM WinSxS: Cleaning superseded Windows Update backups (live non-blocking)..." "INFO"
                 $driveBefore = (Get-PSDrive $env:SystemDrive.TrimEnd(':')).Free
-                & Dism.exe /Online /Cleanup-Image /StartComponentCleanup /Quiet 2>&1 | Out-Null
+                $psi = New-Object System.Diagnostics.ProcessStartInfo
+                $psi.FileName = "Dism.exe"
+                $psi.Arguments = "/Online /Cleanup-Image /StartComponentCleanup /Quiet"
+                $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+                $psi.CreateNoWindow = $true
+                $psi.UseShellExecute = $false
+                $dismProc = [System.Diagnostics.Process]::Start($psi)
+                $swDism = [System.Diagnostics.Stopwatch]::StartNew()
+                $lastSec = -1
+                while (-not $dismProc.HasExited) {
+                    $sec = [int]$swDism.Elapsed.TotalSeconds
+                    if ($sec -ne $lastSec) {
+                        $lastSec = $sec
+                        $Controls['TxtBoostActiveStep'].Text = "Step $stepIdx/$totalSteps : DISM WinSxS Cleanup running (${sec}s)..."
+                    }
+                    Invoke-BoostUiPump
+                    Start-Sleep -Milliseconds 80
+                    if ($swDism.Elapsed.TotalSeconds -gt 180) {
+                        try { $dismProc.Kill() } catch {}
+                        Write-BoostLog "DISM WinSxS: Timed out after 180s (safe abort)." "WARN"
+                        break
+                    }
+                }
                 $driveAfter  = (Get-PSDrive $env:SystemDrive.TrimEnd(':')).Free
                 $dismFreed   = [Math]::Max([int64]0, [int64]($driveAfter - $driveBefore))
                 $totalFreed += $dismFreed
                 $Controls['TxtBoostDisk'].Text = Format-ByteSize $totalFreed
                 $Controls['TxtBoostEstimate'].Text = Format-ByteSize $totalFreed
-                Write-BoostLog "DISM WinSxS: Cleanup complete (~$(Format-ByteSize $dismFreed) reclaimed)." "OK"
+                Write-BoostLog "DISM WinSxS: Cleanup complete in $([int]$swDism.Elapsed.TotalSeconds)s (~$(Format-ByteSize $dismFreed) reclaimed)." "OK"
             } catch {
                 Write-BoostLog "DISM WinSxS: Skipped or encountered an error." "WARN"
             }
