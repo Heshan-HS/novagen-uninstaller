@@ -4205,35 +4205,88 @@ $Controls['BtnRunBloatRadar'].Add_Click({
     $Controls['BtnCleanBloatRadar'].IsEnabled = $false
     $Script:BloatRadarItems.Clear()
     $Controls['GridBloatRadar'].ItemsSource = $Script:BloatRadarItems
+    $Controls['TxtRadarSelectedSize'].Text = "Selected: 0 KB (0 items)"
 
     $staleDays = 14
     [void][int]::TryParse($Controls['TxtRadarStaleDays'].Text, [ref]$staleDays)
     if ($staleDays -lt 1) { $staleDays = 1 }
 
-    $cb = {
-        param($msg)
-        $Controls['TxtRadarStatus'].Text = $msg
-        Invoke-BoostUiPump
-    }
+    $sync = [hashtable]::Synchronized(@{
+        Status  = "Starting background Bloat Radar scan..."
+        Done    = $false
+        Results = $null
+        Error   = $null
+    })
 
-    $found = Invoke-BloatRadarScan `
-        -CustomRoot $Controls['TxtRadarRoot'].Text.Trim() `
-        -StaleDays $staleDays `
-        -ScanDev $Controls['ChkRadarDev'].IsChecked `
-        -ScanGamer $Controls['ChkRadarGamer'].IsChecked `
-        -ScanInstallers $Controls['ChkRadarInstallers'].IsChecked `
-        -ScanDuplicates $Controls['ChkRadarDups'].IsChecked `
-        -StatusCallback $cb
+    $customRoot = $Controls['TxtRadarRoot'].Text.Trim()
+    $scanDev    = [bool]$Controls['ChkRadarDev'].IsChecked
+    $scanGamer  = [bool]$Controls['ChkRadarGamer'].IsChecked
+    $scanInst   = [bool]$Controls['ChkRadarInstallers'].IsChecked
+    $scanDups   = [bool]$Controls['ChkRadarDups'].IsChecked
 
-    $totalBytes = [int64]0
-    foreach ($r in $found) {
-        $Script:BloatRadarItems.Add($r)
-        $totalBytes += $r.SizeBytes
-    }
-    $Controls['TxtRadarStatus'].Text = "Scan Complete — Found $($Script:BloatRadarItems.Count) items totaling $(Format-ByteSize $totalBytes)"
-    Update-RadarSelectedSize
-    $Controls['BtnRunBloatRadar'].IsEnabled = $true
-    $Controls['BtnCleanBloatRadar'].IsEnabled = $true
+    $fnDefs = @"
+Add-Type -AssemblyName System.Drawing
+function Invoke-BoostUiPump {}
+function Format-ByteSize { ${Function:Format-ByteSize} }
+function Get-DirectorySizeFast { ${Function:Get-DirectorySizeFast} }
+function Get-ImageDHash { ${Function:Get-ImageDHash} }
+function Get-HammingDistance64 { ${Function:Get-HammingDistance64} }
+function Invoke-BloatRadarScan { ${Function:Invoke-BloatRadarScan} }
+"@
+
+    $rs = [runspacefactory]::CreateRunspace()
+    $rs.ApartmentState = "MTA"
+    $rs.Open()
+    $rs.SessionStateProxy.SetVariable("sync", $sync)
+    $rs.SessionStateProxy.SetVariable("pRoot", $customRoot)
+    $rs.SessionStateProxy.SetVariable("pDays", $staleDays)
+    $rs.SessionStateProxy.SetVariable("pDev", $scanDev)
+    $rs.SessionStateProxy.SetVariable("pGamer", $scanGamer)
+    $rs.SessionStateProxy.SetVariable("pInst", $scanInst)
+    $rs.SessionStateProxy.SetVariable("pDups", $scanDups)
+
+    $ps = [powershell]::Create()
+    $ps.Runspace = $rs
+    [void]$ps.AddScript($fnDefs + @'
+try {
+    $cb = { param($m); $sync.Status = $m }
+    $res = Invoke-BloatRadarScan -CustomRoot $pRoot -StaleDays $pDays -ScanDev $pDev -ScanGamer $pGamer -ScanInstallers $pInst -ScanDuplicates $pDups -StatusCallback $cb
+    $sync.Results = @($res)
+} catch {
+    $sync.Error = $_.ToString()
+} finally {
+    $sync.Done = $true
+}
+'@)
+    $handle = $ps.BeginInvoke()
+
+    $radarTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $radarTimer.Interval = [TimeSpan]::FromMilliseconds(200)
+    $radarTimer.Add_Tick({
+        $Controls['TxtRadarStatus'].Text = $sync.Status
+        if ($sync.Done) {
+            $radarTimer.Stop()
+            try { $ps.EndInvoke($handle) } catch {}
+            try { $ps.Dispose(); $rs.Close(); $rs.Dispose() } catch {}
+
+            if ($sync.Error) {
+                $Controls['TxtRadarStatus'].Text = "Scan Error: $($sync.Error)"
+            } else {
+                $totalBytes = [int64]0
+                foreach ($r in $sync.Results) {
+                    if ($null -ne $r) {
+                        $Script:BloatRadarItems.Add($r)
+                        $totalBytes += $r.SizeBytes
+                    }
+                }
+                $Controls['TxtRadarStatus'].Text = "Scan Complete — Found $($Script:BloatRadarItems.Count) items totaling $(Format-ByteSize $totalBytes)"
+                Update-RadarSelectedSize
+            }
+            $Controls['BtnRunBloatRadar'].IsEnabled = $true
+            $Controls['BtnCleanBloatRadar'].IsEnabled = $true
+        }
+    }.GetNewClosure())
+    $radarTimer.Start()
 })
 
 $Controls['BtnRadarSelStale'].Add_Click({
