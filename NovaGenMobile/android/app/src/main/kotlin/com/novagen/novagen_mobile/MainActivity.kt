@@ -122,6 +122,29 @@ class MainActivity : FlutterActivity() {
                     val movedList = sortDownloads()
                     mainHandler.post { result.success(movedList) }
                 }
+                "previewDownloadSort" -> executor.execute {
+                    val items = previewDownloadSort()
+                    mainHandler.post { result.success(items) }
+                }
+                "executeSelectedSort" -> {
+                    val paths = call.argument<List<String>>("paths") ?: emptyList()
+                    executor.execute {
+                        val movedList = executeSelectedSort(paths)
+                        mainHandler.post { result.success(movedList) }
+                    }
+                }
+                "uninstallApp" -> {
+                    val pkg = call.argument<String>("packageName") ?: ""
+                    if (pkg.isNotEmpty()) {
+                        try {
+                            startActivity(Intent(Intent.ACTION_DELETE).apply {
+                                data = Uri.parse("package:$pkg")
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            })
+                        } catch (_: Exception) {}
+                    }
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -522,32 +545,55 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun classifyExtension(ext: String): String {
+        return when (ext.lowercase()) {
+            "jpg", "jpeg", "png", "webp", "bmp", "gif", "heic" -> "Images"
+            "mp4", "mkv", "mov", "avi", "webm", "3gp", "flv", "m4v" -> "Videos"
+            "mp3", "wav", "flac", "m4a", "aac", "ogg", "opus", "wma" -> "Audio"
+            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "md", "json", "xml" -> "Docs"
+            "apk", "apks", "xapk" -> "APKs"
+            "zip", "rar", "7z", "tar", "gz", "iso" -> "Archives"
+            else -> "Other"
+        }
+    }
+
+    private fun shouldSkipDir(dir: File, rootPath: String): Boolean {
+        val path = dir.absolutePath
+        if (dir.name.startsWith(".")) return true
+        if (path == "$rootPath/Android/data" || path == "$rootPath/Android/obb") return true
+        return false
+    }
+
     private fun findLargeFiles(minMb: Int): List<Map<String, Any>> {
         val list = mutableListOf<Map<String, Any>>()
         val minBytes = minMb.toLong() * 1024L * 1024L
         val root = Environment.getExternalStorageDirectory()
         if (!root.exists()) return list
+        val rootPath = root.absolutePath
 
         val stack = ArrayDeque<File>()
         stack.add(root)
         var visited = 0
-        while (stack.isNotEmpty() && visited < 3000) {
+        while (stack.isNotEmpty() && visited < 15000) {
             val cur = stack.removeLast()
             visited++
-            if (cur.name.equals("Android", true) && cur.parentFile?.absolutePath == root.absolutePath) continue
+            if (shouldSkipDir(cur, rootPath)) continue
             val children = cur.listFiles() ?: continue
             for (ch in children) {
                 if (ch.isDirectory) stack.add(ch)
                 else if (ch.length() >= minBytes) {
                     val ext = ch.extension.lowercase()
-                    val isVideo = ext in listOf("mp4", "mkv", "mov", "avi", "webm")
-                    val thumb = if (list.size < 45) getFileThumbBase64(ch) else ""
+                    val cat = classifyExtension(ext)
+                    val isVideo = cat == "Videos"
+                    val thumb = if (list.size < 60 && (isVideo || cat == "Images")) getFileThumbBase64(ch) else ""
                     list.add(mapOf(
                         "name" to ch.name,
                         "size" to ch.length(),
                         "path" to ch.absolutePath,
                         "ext" to ext.uppercase(),
+                        "category" to cat,
                         "isVideo" to isVideo,
+                        "selected" to false,
                         "thumb" to thumb
                     ))
                 }
@@ -556,15 +602,30 @@ class MainActivity : FlutterActivity() {
         return list.sortedByDescending { it["size"] as Long }
     }
 
-    private fun computeSha256Sample(file: File): String {
+    private fun computeFastFingerprint(file: File): String {
         return try {
             val md = MessageDigest.getInstance("SHA-256")
-            file.inputStream().use { fis ->
-                val buf = ByteArray(65536)
-                var read = fis.read(buf)
-                while (read > 0) {
-                    md.update(buf, 0, read)
-                    read = fis.read(buf)
+            val len = file.length()
+            if (len <= 10L * 1024L * 1024L) {
+                file.inputStream().use { fis ->
+                    val buf = ByteArray(65536)
+                    var read = fis.read(buf)
+                    while (read > 0) {
+                        md.update(buf, 0, read)
+                        read = fis.read(buf)
+                    }
+                }
+            } else {
+                // Fast 3-point fingerprint (size + head 64KB + mid 64KB + tail 64KB) for large MP4/MP3/ZIP/APK files
+                md.update(len.toString().toByteArray())
+                java.io.RandomAccessFile(file, "r").use { raf ->
+                    val buf = ByteArray(65536)
+                    val offsets = longArrayOf(0L, (len / 2L) - 32768L, (len - 65536L).coerceAtLeast(0L))
+                    for (off in offsets) {
+                        raf.seek(off.coerceAtLeast(0L))
+                        val read = raf.read(buf)
+                        if (read > 0) md.update(buf, 0, read)
+                    }
                 }
             }
             md.digest().joinToString("") { "%02x".format(it) }
@@ -604,103 +665,155 @@ class MainActivity : FlutterActivity() {
         val out = mutableListOf<Map<String, Any>>()
         val root = Environment.getExternalStorageDirectory()
         if (!root.exists()) return out
+        val rootPath = root.absolutePath
 
         val allFiles = mutableListOf<File>()
         val stack = ArrayDeque<File>()
         stack.add(root)
         var visited = 0
-        while (stack.isNotEmpty() && visited < 3000) {
+        while (stack.isNotEmpty() && visited < 15000 && allFiles.size < 25000) {
             val cur = stack.removeLast()
             visited++
-            if (cur.name.equals("Android", true) && cur.parentFile?.absolutePath == root.absolutePath) continue
-            if (cur.name.startsWith(".")) continue
+            if (shouldSkipDir(cur, rootPath)) continue
             val children = cur.listFiles() ?: continue
             for (ch in children) {
                 if (ch.isDirectory) stack.add(ch)
-                else if (ch.length() >= 64 * 1024L) {
+                else if (ch.length() >= 10 * 1024L) {
                     allFiles.add(ch)
-                    if (allFiles.size >= 3000) break
+                    if (allFiles.size >= 25000) break
                 }
             }
         }
 
-        // 1. Exact Duplicates (Size bucket + SHA256)
+        // 1. Exact Duplicates across ALL categories (Images, Videos, Audio/MP3, Docs, APKs, Archives)
         val seenPaths = HashSet<String>()
+        val groups = mutableListOf<Pair<Long, List<Map<String, Any>>>>()
+        var groupCounter = 0
+
         val sizeGroups = allFiles.groupBy { it.length() }.filter { it.value.size > 1 }
         for ((_, grp) in sizeGroups) {
             val byHash = mutableMapOf<String, MutableList<File>>()
             for (f in grp.sortedBy { it.lastModified() }) {
-                if (f.length() > 150L * 1024L * 1024L) continue // skip huge files from full hash freeze
-                val h = computeSha256Sample(f)
+                val h = computeFastFingerprint(f)
                 if (h.isEmpty()) continue
                 byHash.getOrPut(h) { mutableListOf() }.add(f)
             }
             for ((_, dupGroup) in byHash) {
                 if (dupGroup.size > 1) {
+                    groupCounter++
+                    val gId = "exact_$groupCounter"
                     val orig = dupGroup.first()
-                    val thumb = getFileThumbBase64(orig)
+                    val cat = classifyExtension(orig.extension)
+                    val thumb = if (groups.size < 60 && (cat == "Images" || cat == "Videos")) getFileThumbBase64(orig) else ""
+                    val items = mutableListOf<Map<String, Any>>()
+                    val wasted = orig.length() * (dupGroup.size - 1)
                     for ((idx, df) in dupGroup.withIndex()) {
                         seenPaths.add(df.absolutePath)
-                        out.add(mapOf(
+                        items.add(mapOf(
                             "name" to df.name,
                             "path" to df.absolutePath,
                             "size" to df.length(),
+                            "ext" to df.extension.uppercase(),
+                            "category" to cat,
                             "type" to "Exact Duplicate",
+                            "groupId" to gId,
                             "group" to "Copy of ${orig.name}",
                             "isOriginal" to (idx == 0),
                             "selected" to (idx > 0),
                             "thumb" to thumb
                         ))
                     }
+                    groups.add(wasted to items)
                 }
             }
         }
 
         // 2. Perceptual Similar Photos (dHash <= 4 bits)
         val imgExts = setOf("jpg", "jpeg", "png", "webp", "bmp")
-        val imgs = allFiles.filter { !seenPaths.contains(it.absolutePath) && imgExts.contains(it.extension.lowercase()) }.take(300)
+        val imgs = allFiles.filter { !seenPaths.contains(it.absolutePath) && imgExts.contains(it.extension.lowercase()) }.take(350)
         val hashed = mutableListOf<Pair<Long, File>>()
+        val simClusters = mutableMapOf<String, MutableList<File>>()
         for (im in imgs) {
             val dh = getImageDHash(im) ?: continue
             val match = hashed.firstOrNull { hammingDist(dh, it.first) <= 4 }
             if (match != null) {
-                val thumb = getFileThumbBase64(im)
-                out.add(mapOf(
-                    "name" to im.name,
-                    "path" to im.absolutePath,
-                    "size" to im.length(),
-                    "type" to "Similar Photo (dHash)",
-                    "group" to "Near ${match.second.name}",
-                    "isOriginal" to false,
-                    "selected" to false,
-                    "thumb" to thumb
-                ))
+                simClusters.getOrPut(match.second.absolutePath) { mutableListOf(match.second) }.add(im)
             } else {
                 hashed.add(dh to im)
             }
         }
+        for ((_, cluster) in simClusters) {
+            if (cluster.size > 1) {
+                groupCounter++
+                val gId = "sim_$groupCounter"
+                val orig = cluster.first()
+                val items = mutableListOf<Map<String, Any>>()
+                val wasted = cluster.drop(1).sumOf { it.length() }
+                for ((idx, sf) in cluster.withIndex()) {
+                    val thumb = if (groups.size < 75) getFileThumbBase64(sf) else ""
+                    items.add(mapOf(
+                        "name" to sf.name,
+                        "path" to sf.absolutePath,
+                        "size" to sf.length(),
+                        "ext" to sf.extension.uppercase(),
+                        "category" to "Images",
+                        "type" to "Similar Photo (dHash)",
+                        "groupId" to gId,
+                        "group" to "Near ${orig.name}",
+                        "isOriginal" to (idx == 0),
+                        "selected" to false,
+                        "thumb" to thumb
+                    ))
+                }
+                groups.add(wasted to items)
+            }
+        }
 
+        for ((_, items) in groups.sortedByDescending { it.first }) {
+            out.addAll(items)
+        }
         return out
     }
 
-    private fun sortDownloads(): List<String> {
+    private fun sortCategoryForExt(ext: String): String? {
+        return when (ext.lowercase()) {
+            "apk", "apks", "xapk", "exe", "msi" -> "Installers"
+            "zip", "rar", "7z", "tar", "gz" -> "Archives"
+            "jpg", "jpeg", "png", "webp", "gif", "heic" -> "Images"
+            "mp4", "mkv", "mov", "webm", "avi" -> "Videos"
+            "mp3", "wav", "flac", "m4a", "aac", "ogg", "opus" -> "Audio"
+            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv" -> "Documents"
+            else -> null
+        }
+    }
+
+    private fun previewDownloadSort(): List<Map<String, Any>> {
+        val list = mutableListOf<Map<String, Any>>()
+        val dl = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        if (!dl.exists()) return list
+        val files = dl.listFiles() ?: return list
+        for (f in files) {
+            if (!f.isFile) continue
+            val cat = sortCategoryForExt(f.extension) ?: continue
+            list.add(mapOf(
+                "name" to f.name,
+                "path" to f.absolutePath,
+                "size" to f.length(),
+                "targetCategory" to cat,
+                "selected" to true
+            ))
+        }
+        return list.sortedByDescending { it["size"] as Long }
+    }
+
+    private fun executeSelectedSort(paths: List<String>): List<String> {
         val moved = mutableListOf<String>()
         val dl = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         if (!dl.exists()) return moved
-        val files = dl.listFiles() ?: return moved
-        for (f in files) {
-            if (!f.isFile) continue
-            val ext = f.extension.lowercase()
-            val cat = when (ext) {
-                "apk", "apks", "xapk", "exe", "msi" -> "Installers"
-                "zip", "rar", "7z", "tar", "gz" -> "Archives"
-                "jpg", "jpeg", "png", "webp", "gif", "heic" -> "Images"
-                "mp4", "mkv", "mov", "webm", "avi" -> "Videos"
-                "mp3", "wav", "flac", "m4a", "aac", "ogg" -> "Audio"
-                "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv" -> "Documents"
-                else -> null
-            } ?: continue
-
+        for (p in paths) {
+            val f = File(p)
+            if (!f.exists() || !f.isFile) continue
+            val cat = sortCategoryForExt(f.extension) ?: continue
             val destDir = File(dl, "Sorted/$cat")
             if (!destDir.exists()) destDir.mkdirs()
             var dest = File(destDir, f.name)
@@ -714,5 +827,12 @@ class MainActivity : FlutterActivity() {
             }
         }
         return moved
+    }
+
+    private fun sortDownloads(): List<String> {
+        val dl = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        if (!dl.exists()) return emptyList()
+        val paths = (dl.listFiles() ?: emptyArray()).filter { it.isFile }.map { it.absolutePath }
+        return executeSelectedSort(paths)
     }
 }
