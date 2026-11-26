@@ -2243,11 +2243,25 @@ function Invoke-BloatRadarScan {
     return ($results | Sort-Object SizeBytes -Descending)
 }
 
+function Get-KnownDownloadsPath {
+    try {
+        $p = (New-Object -ComObject Shell.Application).NameSpace('shell:Downloads').Self.Path
+        if (-not [string]::IsNullOrWhiteSpace($p) -and (Test-Path -LiteralPath $p)) { return $p }
+    } catch {}
+    return "$env:USERPROFILE\Downloads"
+}
+
+function Get-KnownDesktopPath {
+    $p = [Environment]::GetFolderPath('Desktop')
+    if (-not [string]::IsNullOrWhiteSpace($p) -and (Test-Path -LiteralPath $p)) { return $p }
+    return "$env:USERPROFILE\Desktop"
+}
+
 function Get-FileSortCategory {
     param([string]$Extension)
     $ext = $Extension.ToLower()
     switch ($ext) {
-        { $_ -in @('.exe', '.msi', '.msix', '.appx', '.iso', '.bat') } { return "Installers" }
+        { $_ -in @('.exe', '.msi', '.msix', '.appx', '.appinstaller', '.apk', '.iso', '.bat') } { return "Installers" }
         { $_ -in @('.zip', '.rar', '.7z', '.tar', '.gz', '.xz') }     { return "Archives" }
         { $_ -in @('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.svg', '.ico') } { return "Images" }
         { $_ -in @('.mp4', '.mkv', '.avi', '.mov', '.webm', '.wmv') }  { return "Videos" }
@@ -4514,12 +4528,14 @@ function Invoke-OrganizeFolderNow {
 $Controls['BtnWatchdogSortNow'].Add_Click({
     $tot = 0
     if ($Controls['ChkWatchDownloads'].IsChecked) {
-        Write-WatchdogLog "Scanning Downloads for unsorted files..."
-        $tot += Invoke-OrganizeFolderNow "$env:USERPROFILE\Downloads"
+        $dlPath = Get-KnownDownloadsPath
+        Write-WatchdogLog "Scanning Downloads ($dlPath) for unsorted files..."
+        $tot += Invoke-OrganizeFolderNow $dlPath
     }
     if ($Controls['ChkWatchDesktop'].IsChecked) {
-        Write-WatchdogLog "Scanning Desktop for unsorted files (shortcuts preserved)..."
-        $tot += Invoke-OrganizeFolderNow "$env:USERPROFILE\Desktop"
+        $dtPath = Get-KnownDesktopPath
+        Write-WatchdogLog "Scanning Desktop ($dtPath) for unsorted files (shortcuts preserved)..."
+        $tot += Invoke-OrganizeFolderNow $dtPath
     }
     Write-WatchdogLog "Instant Sort Complete: $tot file(s) organized into Sorted\ subfolders."
 })
@@ -4545,8 +4561,10 @@ $Controls['BtnWatchdogToggle'].Add_Click({
         return
     }
     $watchPaths = New-Object System.Collections.Generic.List[string]
-    if ($Controls['ChkWatchDownloads'].IsChecked -and (Test-Path "$env:USERPROFILE\Downloads")) { $watchPaths.Add("$env:USERPROFILE\Downloads") }
-    if ($Controls['ChkWatchDesktop'].IsChecked -and (Test-Path "$env:USERPROFILE\Desktop"))   { $watchPaths.Add("$env:USERPROFILE\Desktop") }
+    $dlReal = Get-KnownDownloadsPath
+    $dtReal = Get-KnownDesktopPath
+    if ($Controls['ChkWatchDownloads'].IsChecked -and (Test-Path $dlReal)) { $watchPaths.Add($dlReal) }
+    if ($Controls['ChkWatchDesktop'].IsChecked -and (Test-Path $dtReal))   { $watchPaths.Add($dtReal) }
     if ($watchPaths.Count -eq 0) {
         [System.Windows.MessageBox]::Show($Window, "Select at least Downloads or Desktop to watch.", "NovaGen // Auto-Sort Watchdog", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information) | Out-Null
         return
