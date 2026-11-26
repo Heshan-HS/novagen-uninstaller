@@ -2052,67 +2052,9 @@ function Invoke-BloatRadarScan {
         }
     }
 
-    # 1. Dev Bloat Scan (Fast BFS without recursing inside matched bloat folders)
-    if ($ScanDev) {
-        if ($StatusCallback) { & $StatusCallback "Scanning stale Dev artifacts (node_modules, .dart_tool, .gradle, build)..." }
-        $queue = New-Object System.Collections.Generic.Queue[object]
-        foreach ($r in ($roots | Select-Object -Unique)) {
-            $queue.Enqueue(@{ Path = $r; Depth = 0 })
-        }
-        $visited = 0
-        while ($queue.Count -gt 0 -and $visited -lt 3000) {
-            $cur = $queue.Dequeue()
-            $curPath = $cur.Path
-            $depth   = $cur.Depth
-            if ($depth -gt 4) { continue }
-            $visited++
-            if (($visited % 100) -eq 0 -and $StatusCallback) {
-                & $StatusCallback "Scanning Dev ($visited dirs, $($results.Count) found): $curPath"
-            }
-
-            $subDirs = $null
-            try { $subDirs = [System.IO.Directory]::GetDirectories($curPath) } catch { continue }
-            foreach ($sd in $subDirs) {
-                $name = [System.IO.Path]::GetFileName($sd)
-                if ($skipDirs -contains $name) { continue }
-                if ($devTargets -contains $name) {
-                    try {
-                        $di = New-Object System.IO.DirectoryInfo($sd)
-                        # Only flag 'build' / 'dist' / 'target' if a project marker exists in parent
-                        if ($name -in @('build', 'dist', 'target')) {
-                            $hasMarker = (Test-Path (Join-Path $curPath 'package.json')) -or
-                                         (Test-Path (Join-Path $curPath 'pubspec.yaml')) -or
-                                         (Test-Path (Join-Path $curPath 'build.gradle')) -or
-                                         (Test-Path (Join-Path $curPath 'Cargo.toml')) -or
-                                         (Test-Path (Join-Path $curPath 'pom.xml'))
-                            if (-not $hasMarker) { continue }
-                        }
-                        $sz = Get-DirectorySizeFast $sd
-                        if ($sz -lt 1MB) { continue }
-                        $ageDays = [int]($now - $di.LastWriteTime).TotalDays
-                        $isStale = ($di.LastWriteTime -lt $staleCutoff)
-                        $tag = if ($isStale) { "STALE ($ageDays d)" } else { "ACTIVE ($ageDays d)" }
-                        & $emitItem @{
-                            IsSelected = $isStale
-                            Category   = "Dev Bloat [$name]"
-                            StatusTag  = $tag
-                            SizeBytes  = $sz
-                            SizeDisplay= Format-ByteSize $sz
-                            TargetPath = $sd
-                            ItemType   = "DIR"
-                        }
-                    } catch {}
-                    continue # Do NOT recurse inside node_modules / .gradle / build
-                }
-                $queue.Enqueue(@{ Path = $sd; Depth = ($depth + 1) })
-            }
-        }
-    }
-
-    # 2. Gamer Bloat Scan (Steam Downloading / ShaderCache + GPU Caches)
+    # 1. Gamer Bloat Scan FIRST (Fast < 0.5s — immediate live results!)
     if ($ScanGamer) {
         if ($StatusCallback) { & $StatusCallback "Scanning Gamer & Shader caches (Steam, NVIDIA, AMD, DirectX)..." }
-        Invoke-BoostUiPump
         $gamerPaths = New-Object System.Collections.Generic.List[hashtable]
         foreach ($steamBase in @("${env:ProgramFiles(x86)}\Steam\steamapps", "$env:ProgramFiles\Steam\steamapps", "D:\SteamLibrary\steamapps", "E:\SteamLibrary\steamapps")) {
             if (Test-Path $steamBase) {
@@ -2143,10 +2085,9 @@ function Invoke-BloatRadarScan {
         }
     }
 
-    # 3. Orphaned Installers (Downloads & Desktop)
+    # 2. Orphaned Installers (Fast < 0.3s)
     if ($ScanInstallers) {
         if ($StatusCallback) { & $StatusCallback "Scanning orphaned installers (.exe / .msi / .iso)..." }
-        Invoke-BoostUiPump
         foreach ($dlDir in @("$env:USERPROFILE\Downloads", "$env:USERPROFILE\Desktop")) {
             if (-not (Test-Path $dlDir)) { continue }
             Get-ChildItem -LiteralPath $dlDir -File -ErrorAction SilentlyContinue | Where-Object {
@@ -2163,6 +2104,63 @@ function Invoke-BloatRadarScan {
                     TargetPath  = $_.FullName
                     ItemType    = "FILE"
                 }
+            }
+        }
+    }
+
+    # 3. Dev Bloat Scan (Fast BFS without recursing inside matched bloat folders)
+    if ($ScanDev) {
+        if ($StatusCallback) { & $StatusCallback "Scanning stale Dev artifacts (node_modules, .dart_tool, .gradle, build)..." }
+        $queue = New-Object System.Collections.Generic.Queue[object]
+        foreach ($r in ($roots | Select-Object -Unique)) {
+            $queue.Enqueue(@{ Path = $r; Depth = 0 })
+        }
+        $visited = 0
+        while ($queue.Count -gt 0 -and $visited -lt 1500) {
+            $cur = $queue.Dequeue()
+            $curPath = $cur.Path
+            $depth   = $cur.Depth
+            if ($depth -gt 3) { continue }
+            $visited++
+            if (($visited % 60) -eq 0 -and $StatusCallback) {
+                & $StatusCallback "Scanning Dev ($visited dirs, $($results.Count) found): $curPath"
+            }
+
+            $subDirs = $null
+            try { $subDirs = [System.IO.Directory]::GetDirectories($curPath) } catch { continue }
+            foreach ($sd in $subDirs) {
+                $name = [System.IO.Path]::GetFileName($sd)
+                if ($skipDirs -contains $name) { continue }
+                if ($devTargets -contains $name) {
+                    try {
+                        $di = New-Object System.IO.DirectoryInfo($sd)
+                        if ($name -in @('build', 'dist', 'target')) {
+                            $hasMarker = (Test-Path (Join-Path $curPath 'package.json')) -or
+                                         (Test-Path (Join-Path $curPath 'pubspec.yaml')) -or
+                                         (Test-Path (Join-Path $curPath 'build.gradle')) -or
+                                         (Test-Path (Join-Path $curPath 'Cargo.toml')) -or
+                                         (Test-Path (Join-Path $curPath 'pom.xml'))
+                            if (-not $hasMarker) { continue }
+                        }
+                        if ($StatusCallback) { & $StatusCallback "Measuring $($name): $sd" }
+                        $sz = Get-DirectorySizeFast $sd
+                        if ($sz -lt 1MB) { continue }
+                        $ageDays = [int]($now - $di.LastWriteTime).TotalDays
+                        $isStale = ($di.LastWriteTime -lt $staleCutoff)
+                        $tag = if ($isStale) { "STALE ($ageDays d)" } else { "ACTIVE ($ageDays d)" }
+                        & $emitItem @{
+                            IsSelected = $isStale
+                            Category   = "Dev Bloat [$name]"
+                            StatusTag  = $tag
+                            SizeBytes  = $sz
+                            SizeDisplay= Format-ByteSize $sz
+                            TargetPath = $sd
+                            ItemType   = "DIR"
+                        }
+                    } catch {}
+                    continue
+                }
+                $queue.Enqueue(@{ Path = $sd; Depth = ($depth + 1) })
             }
         }
     }
@@ -4269,18 +4267,29 @@ try {
     $sync.Done = $true
 }
 '@)
-    $handle = $ps.BeginInvoke()
+    $Script:RadarJob = @{
+        Sync         = $sync
+        PS           = $ps
+        RS           = $rs
+        Handle       = $ps.BeginInvoke()
+        ProcessedIdx = 0
+        Timer        = $null
+    }
 
-    $processedIdx = 0
     $radarTimer = New-Object System.Windows.Threading.DispatcherTimer
     $radarTimer.Interval = [TimeSpan]::FromMilliseconds(200)
+    $Script:RadarJob.Timer = $radarTimer
+
     $radarTimer.Add_Tick({
-        $Controls['TxtRadarStatus'].Text = $sync.Status
+        $job = $Script:RadarJob
+        if (-not $job) { return }
+        $s = $job.Sync
+        $Controls['TxtRadarStatus'].Text = $s.Status
         $newAdded = $false
-        $curCount = $sync.LiveItems.Count
-        while ($processedIdx -lt $curCount) {
-            $qItem = $sync.LiveItems[$processedIdx]
-            $processedIdx++
+        $curCount = $s.LiveItems.Count
+        while ($job.ProcessedIdx -lt $curCount) {
+            $qItem = $s.LiveItems[$job.ProcessedIdx]
+            $job.ProcessedIdx++
             if ($null -ne $qItem) {
                 $Script:BloatRadarItems.Add($qItem)
                 $newAdded = $true
@@ -4288,18 +4297,18 @@ try {
         }
         if ($newAdded) { Update-RadarSelectedSize }
 
-        if ($sync.Done) {
-            $radarTimer.Stop()
-            try { $ps.EndInvoke($handle) } catch {}
-            try { $ps.Dispose(); $rs.Close(); $rs.Dispose() } catch {}
+        if ($s.Done) {
+            $job.Timer.Stop()
+            try { $job.PS.EndInvoke($job.Handle) } catch {}
+            try { $job.PS.Dispose(); $job.RS.Close(); $job.RS.Dispose() } catch {}
 
-            if ($sync.Error) {
-                $Controls['TxtRadarStatus'].Text = "Scan Error: $($sync.Error)"
+            if ($s.Error) {
+                $Controls['TxtRadarStatus'].Text = "Scan Error: $($s.Error)"
             } else {
-                $curCount = $sync.LiveItems.Count
-                while ($processedIdx -lt $curCount) {
-                    $qItem = $sync.LiveItems[$processedIdx]
-                    $processedIdx++
+                $curCount = $s.LiveItems.Count
+                while ($job.ProcessedIdx -lt $curCount) {
+                    $qItem = $s.LiveItems[$job.ProcessedIdx]
+                    $job.ProcessedIdx++
                     if ($null -ne $qItem) { $Script:BloatRadarItems.Add($qItem) }
                 }
                 $totalBytes = ($Script:BloatRadarItems | Measure-Object -Property SizeBytes -Sum).Sum
@@ -4309,8 +4318,9 @@ try {
             }
             $Controls['BtnRunBloatRadar'].IsEnabled = $true
             $Controls['BtnCleanBloatRadar'].IsEnabled = $true
+            $Script:RadarJob = $null
         }
-    }.GetNewClosure())
+    })
     $radarTimer.Start()
 })
 
