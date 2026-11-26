@@ -3041,6 +3041,19 @@ function Invoke-PCSpeedBoost {
 $reader = New-Object System.Xml.XmlNodeReader($xaml)
 $Window = [Windows.Markup.XamlReader]::Load($reader)
 
+foreach ($icoCandidate in @(
+    (Join-Path $PSScriptRoot "NovaGen.ico"),
+    (Join-Path $Script:AppRoot "Runtime\NovaGen.ico"),
+    (Join-Path $Script:AppRoot "NovaGen.ico")
+)) {
+    if (-not [string]::IsNullOrWhiteSpace($icoCandidate) -and (Test-Path -LiteralPath $icoCandidate)) {
+        try {
+            $Window.Icon = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]::new($icoCandidate))
+            break
+        } catch {}
+    }
+}
+
 $Controls = @{}
 $xaml.SelectNodes("//*[@*[local-name()='Name']]") | ForEach-Object {
     $cName = $_.GetAttribute("Name", "http://schemas.microsoft.com/winfx/2006/xaml")

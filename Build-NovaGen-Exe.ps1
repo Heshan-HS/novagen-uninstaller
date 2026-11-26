@@ -14,8 +14,9 @@ if (-not (Test-Path -LiteralPath $enginePath)) {
 
 Add-Type -AssemblyName System.Drawing
 
-# 1. Generate a crisp high-contrast Obsidian + Cobalt "N" Icon (NovaGen.ico)
+# 1. Use existing custom NovaGen.ico (only generate fallback if missing)
 $icoPath = Join-Path $root "NovaGen.ico"
+if (-not (Test-Path -LiteralPath $icoPath)) {
 $bmp = New-Object System.Drawing.Bitmap(64, 64)
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
@@ -58,6 +59,7 @@ $bw.Write($pngBytes)
 $bw.Flush()
 $bw.Close()
 $fsIco.Dispose()
+}
 
 # 2. Compile Single-File Standalone NovaGen.exe with Embedded Engine Script
 $exePath = Join-Path $root "NovaGen.exe"
@@ -71,11 +73,11 @@ using System.Text;
 using System.Windows.Forms;
 
 [assembly: AssemblyTitle("NovaGen Zero-Trace Deep Uninstaller Pro")]
-[assembly: AssemblyDescription("Standalone 18-Point Deep Uninstaller & Leftover Wipe Engine")]
+[assembly: AssemblyDescription("Standalone 18-Point Deep Uninstaller, Leftover Wipe & PC Speed Boost Engine")]
 [assembly: AssemblyCompany("NovaGen Systems")]
 [assembly: AssemblyProduct("NovaGen Deep Uninstaller Pro")]
-[assembly: AssemblyVersion("4.2.1.0")]
-[assembly: AssemblyFileVersion("4.2.1.0")]
+[assembly: AssemblyVersion("4.3.0.0")]
+[assembly: AssemblyFileVersion("4.3.0.0")]
 
 namespace NovaGenLauncher {
     static class Program {
@@ -119,6 +121,13 @@ namespace NovaGenLauncher {
                             s.CopyTo(fs);
                         }
                     }
+                    using (Stream sIco = asm.GetManifestResourceStream("NovaGen.ico")) {
+                        if (sIco != null) {
+                            using (FileStream fsIco = new FileStream(Path.Combine(runtimeDir, "NovaGen.ico"), FileMode.Create, FileAccess.Write, FileShare.Read)) {
+                                sIco.CopyTo(fsIco);
+                            }
+                        }
+                    }
                 }
 
                 ProcessStartInfo psi = new ProcessStartInfo();
@@ -145,6 +154,7 @@ $params.CompilerOptions = "/target:winexe /optimize /win32icon:`"$icoPath`""
 [void]$params.ReferencedAssemblies.Add("System.dll")
 [void]$params.ReferencedAssemblies.Add("System.Windows.Forms.dll")
 [void]$params.EmbeddedResources.Add($enginePath)
+[void]$params.EmbeddedResources.Add($icoPath)
 
 $results = $provider.CompileAssemblyFromSource($params, $csCode)
 if ($results.Errors.HasErrors) {
