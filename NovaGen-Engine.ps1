@@ -1949,6 +1949,343 @@ function Invoke-PCSpeedBoost {
 }
 
 # ============================================================================
+# 9C. DEV & GAMER BLOAT RADAR + PERCEPTUAL DHASH + AUTO-SORT WATCHDOG
+# ============================================================================
+$Script:BloatRadarItems = New-Object System.Collections.ObjectModel.ObservableCollection[PSObject]
+$Script:WatchdogWatchers = New-Object System.Collections.Generic.List[System.IO.FileSystemWatcher]
+$Script:WatchdogQueue    = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
+$Script:WatchdogTimer    = $null
+$Script:WatchdogRunning  = $false
+$Script:WatchdogMovedCount = 0
+
+function Get-ImageDHash {
+    param([string]$FilePath)
+    try {
+        $fs = [System.IO.File]::OpenRead($FilePath)
+        try {
+            $img = [System.Drawing.Image]::FromStream($fs, $false, $false)
+            $bmp = New-Object System.Drawing.Bitmap(9, 8)
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::Bilinear
+            $g.DrawImage($img, 0, 0, 9, 8)
+            $g.Dispose()
+            $img.Dispose()
+            [uint64]$hash = 0
+            $bit = 0
+            for ($y = 0; $y -lt 8; $y++) {
+                for ($x = 0; $x -lt 8; $x++) {
+                    $c1 = $bmp.GetPixel($x, $y)
+                    $c2 = $bmp.GetPixel($x + 1, $y)
+                    $l1 = ($c1.R * 0.299) + ($c1.G * 0.587) + ($c1.B * 0.114)
+                    $l2 = ($c2.R * 0.299) + ($c2.G * 0.587) + ($c2.B * 0.114)
+                    if ($l1 -gt $l2) {
+                        $hash = $hash -bor ([uint64]1 -shl $bit)
+                    }
+                    $bit++
+                }
+            }
+            $bmp.Dispose()
+            return $hash
+        } finally {
+            $fs.Dispose()
+        }
+    } catch {
+        return $null
+    }
+}
+
+function Get-HammingDistance64 {
+    param([uint64]$A, [uint64]$B)
+    $x = $A -bxor $B
+    $dist = 0
+    while ($x -ne 0) {
+        $x = $x -band ($x - 1)
+        $dist++
+    }
+    return $dist
+}
+
+function Invoke-BloatRadarScan {
+    param(
+        [string]$CustomRoot = "",
+        [int]$StaleDays = 14,
+        [bool]$ScanDev = $true,
+        [bool]$ScanGamer = $true,
+        [bool]$ScanInstallers = $true,
+        [bool]$ScanDuplicates = $true,
+        [scriptblock]$StatusCallback = $null
+    )
+
+    $results = New-Object System.Collections.Generic.List[PSObject]
+    $now = Get-Date
+    $staleCutoff = $now.AddDays(-$StaleDays)
+
+    $devTargets = @('node_modules', '.dart_tool', '.gradle', 'build', 'target', '__pycache__', '.next', 'dist', '.venv')
+    $skipDirs   = @('Windows', 'Program Files', 'Program Files (x86)', 'ProgramData', '$Recycle.Bin', 'System Volume Information', 'AppData', '.git')
+
+    # Determine roots
+    $roots = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($CustomRoot) -and (Test-Path -LiteralPath $CustomRoot)) {
+        $roots.Add($CustomRoot)
+    } else {
+        foreach ($cand in @(
+            "$env:USERPROFILE\Desktop",
+            "$env:USERPROFILE\Downloads",
+            "$env:USERPROFILE\Documents",
+            "$env:USERPROFILE\source",
+            "$env:USERPROFILE\Projects"
+        )) {
+            if (Test-Path -LiteralPath $cand) { $roots.Add($cand) }
+        }
+        # Include non-OS fixed drives root folders (e.g. D:\) up to dev folders
+        Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue | Where-Object {
+            $_.Root -ne "$env:SystemDrive\" -and $_.Free -ne $null -and (Test-Path $_.Root)
+        } | ForEach-Object {
+            $roots.Add($_.Root.TrimEnd('\'))
+        }
+    }
+
+    # 1. Dev Bloat Scan (Fast BFS without recursing inside matched bloat folders)
+    if ($ScanDev) {
+        if ($StatusCallback) { & $StatusCallback "Scanning stale Dev artifacts (node_modules, .dart_tool, .gradle, build)..." }
+        $queue = New-Object System.Collections.Generic.Queue[object]
+        foreach ($r in ($roots | Select-Object -Unique)) {
+            $queue.Enqueue(@{ Path = $r; Depth = 0 })
+        }
+        $visited = 0
+        while ($queue.Count -gt 0 -and $visited -lt 6000) {
+            $cur = $queue.Dequeue()
+            $curPath = $cur.Path
+            $depth   = $cur.Depth
+            if ($depth -gt 5) { continue }
+            $visited++
+            if (($visited % 120) -eq 0) { Invoke-BoostUiPump }
+
+            $subDirs = $null
+            try { $subDirs = [System.IO.Directory]::GetDirectories($curPath) } catch { continue }
+            foreach ($sd in $subDirs) {
+                $name = [System.IO.Path]::GetFileName($sd)
+                if ($skipDirs -contains $name) { continue }
+                if ($devTargets -contains $name) {
+                    try {
+                        $di = New-Object System.IO.DirectoryInfo($sd)
+                        # Only flag 'build' / 'dist' / 'target' if a project marker exists in parent
+                        if ($name -in @('build', 'dist', 'target')) {
+                            $hasMarker = (Test-Path (Join-Path $curPath 'package.json')) -or
+                                         (Test-Path (Join-Path $curPath 'pubspec.yaml')) -or
+                                         (Test-Path (Join-Path $curPath 'build.gradle')) -or
+                                         (Test-Path (Join-Path $curPath 'Cargo.toml')) -or
+                                         (Test-Path (Join-Path $curPath 'pom.xml'))
+                            if (-not $hasMarker) { continue }
+                        }
+                        $sz = Get-DirectorySizeFast $sd
+                        if ($sz -lt 1MB) { continue }
+                        $ageDays = [int]($now - $di.LastWriteTime).TotalDays
+                        $isStale = ($di.LastWriteTime -lt $staleCutoff)
+                        $tag = if ($isStale) { "STALE ($ageDays d)" } else { "ACTIVE ($ageDays d)" }
+                        $results.Add([PSCustomObject]@{
+                            IsSelected = $isStale
+                            Category   = "Dev Bloat [$name]"
+                            StatusTag  = $tag
+                            SizeBytes  = $sz
+                            SizeDisplay= Format-ByteSize $sz
+                            TargetPath = $sd
+                            ItemType   = "DIR"
+                        })
+                    } catch {}
+                    continue # Do NOT recurse inside node_modules / .gradle / build
+                }
+                $queue.Enqueue(@{ Path = $sd; Depth = ($depth + 1) })
+            }
+        }
+    }
+
+    # 2. Gamer Bloat Scan (Steam Downloading / ShaderCache + GPU Caches)
+    if ($ScanGamer) {
+        if ($StatusCallback) { & $StatusCallback "Scanning Gamer & Shader caches (Steam, NVIDIA, AMD, DirectX)..." }
+        Invoke-BoostUiPump
+        $gamerPaths = New-Object System.Collections.Generic.List[hashtable]
+        foreach ($steamBase in @("${env:ProgramFiles(x86)}\Steam\steamapps", "$env:ProgramFiles\Steam\steamapps", "D:\SteamLibrary\steamapps", "E:\SteamLibrary\steamapps")) {
+            if (Test-Path $steamBase) {
+                $gamerPaths.Add(@{ Cat = "Steam Downloading"; Path = (Join-Path $steamBase "downloading") })
+                $gamerPaths.Add(@{ Cat = "Steam ShaderCache"; Path = (Join-Path $steamBase "shadercache") })
+            }
+        }
+        $gamerPaths.Add(@{ Cat = "NVIDIA DXCache"; Path = "$env:LOCALAPPDATA\NVIDIA\DXCache" })
+        $gamerPaths.Add(@{ Cat = "NVIDIA GLCache"; Path = "$env:LOCALAPPDATA\NVIDIA\GLCache" })
+        $gamerPaths.Add(@{ Cat = "AMD DxCache";    Path = "$env:LOCALAPPDATA\AMD\DxCache" })
+        $gamerPaths.Add(@{ Cat = "DirectX Cache";  Path = "$env:LOCALAPPDATA\D3DSCache" })
+
+        foreach ($gp in $gamerPaths) {
+            if (Test-Path -LiteralPath $gp.Path) {
+                $sz = Get-DirectorySizeFast $gp.Path
+                if ($sz -ge 1MB) {
+                    $results.Add([PSCustomObject]@{
+                        IsSelected  = $true
+                        Category    = $gp.Cat
+                        StatusTag   = "SAFE CACHE"
+                        SizeBytes   = $sz
+                        SizeDisplay = Format-ByteSize $sz
+                        TargetPath  = $gp.Path
+                        ItemType    = "DIR_CONTENTS"
+                    })
+                }
+            }
+        }
+    }
+
+    # 3. Orphaned Installers (Downloads & Desktop)
+    if ($ScanInstallers) {
+        if ($StatusCallback) { & $StatusCallback "Scanning orphaned installers (.exe / .msi / .iso)..." }
+        Invoke-BoostUiPump
+        foreach ($dlDir in @("$env:USERPROFILE\Downloads", "$env:USERPROFILE\Desktop")) {
+            if (-not (Test-Path $dlDir)) { continue }
+            Get-ChildItem -LiteralPath $dlDir -File -ErrorAction SilentlyContinue | Where-Object {
+                $_.Extension -in @('.exe', '.msi', '.msix', '.iso') -and $_.Length -ge 5MB
+            } | ForEach-Object {
+                $ageDays = [int]($now - $_.LastWriteTime).TotalDays
+                $isOld = ($ageDays -ge $StaleDays)
+                $results.Add([PSCustomObject]@{
+                    IsSelected  = $isOld
+                    Category    = "Installer ($($_.Extension))"
+                    StatusTag   = if ($isOld) { "ORPHAN ($ageDays d)" } else { "RECENT ($ageDays d)" }
+                    SizeBytes   = [int64]$_.Length
+                    SizeDisplay = Format-ByteSize $_.Length
+                    TargetPath  = $_.FullName
+                    ItemType    = "FILE"
+                })
+            }
+        }
+    }
+
+    # 4. Duplicate Media & Files (Exact Size+SHA256 + Perceptual Image dHash)
+    if ($ScanDuplicates) {
+        if ($StatusCallback) { & $StatusCallback "Scanning Duplicate Media (SHA256 + Perceptual Image dHash)..." }
+        Invoke-BoostUiPump
+        $mediaRoots = @("$env:USERPROFILE\Pictures", "$env:USERPROFILE\Videos", "$env:USERPROFILE\Downloads", "$env:USERPROFILE\Desktop")
+        $allFiles = New-Object System.Collections.Generic.List[System.IO.FileInfo]
+        foreach ($mr in $mediaRoots) {
+            if (-not (Test-Path $mr)) { continue }
+            try {
+                Get-ChildItem -LiteralPath $mr -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
+                    $_.Length -ge 100KB -and $_.FullName -notmatch '\\Sorted\\'
+                } | Select-Object -First 2000 | ForEach-Object { $allFiles.Add($_) }
+            } catch {}
+        }
+
+        # 4a. Exact Duplicates by Size -> SHA256
+        $bySize = $allFiles | Group-Object Length | Where-Object { $_.Count -gt 1 }
+        $seenDupPaths = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($grp in $bySize) {
+            Invoke-BoostUiPump
+            $hashes = @{}
+            foreach ($f in ($grp.Group | Sort-Object LastWriteTime)) {
+                try {
+                    $h = (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256 -ErrorAction SilentlyContinue).Hash
+                    if (-not $h) { continue }
+                    if ($hashes.ContainsKey($h)) {
+                        [void]$seenDupPaths.Add($f.FullName)
+                        $results.Add([PSCustomObject]@{
+                            IsSelected  = $true
+                            Category    = "Exact Duplicate"
+                            StatusTag   = "DUP OF $($hashes[$h])"
+                            SizeBytes   = [int64]$f.Length
+                            SizeDisplay = Format-ByteSize $f.Length
+                            TargetPath  = $f.FullName
+                            ItemType    = "FILE"
+                        })
+                    } else {
+                        $hashes[$h] = $f.Name
+                    }
+                } catch {}
+            }
+        }
+
+        # 4b. Perceptual Near-Duplicate Photos (dHash <= 4 bits)
+        $imgFiles = $allFiles | Where-Object {
+            $_.Extension -in @('.jpg', '.jpeg', '.png', '.bmp') -and (-not $seenDupPaths.Contains($_.FullName))
+        } | Select-Object -First 350
+        $dhashList = New-Object System.Collections.Generic.List[PSObject]
+        foreach ($im in $imgFiles) {
+            $dh = Get-ImageDHash $im.FullName
+            if ($null -ne $dh) {
+                $matched = $null
+                foreach ($prev in $dhashList) {
+                    if ((Get-HammingDistance64 $dh $prev.Hash) -le 4) {
+                        $matched = $prev
+                        break
+                    }
+                }
+                if ($matched) {
+                    $results.Add([PSCustomObject]@{
+                        IsSelected  = $false # Keep unchecked for safety so user reviews visual match
+                        Category    = "Similar Photo (dHash)"
+                        StatusTag   = "NEAR $($matched.Name)"
+                        SizeBytes   = [int64]$im.Length
+                        SizeDisplay = Format-ByteSize $im.Length
+                        TargetPath  = $im.FullName
+                        ItemType    = "FILE"
+                    })
+                } else {
+                    $dhashList.Add([PSCustomObject]@{ Hash = $dh; Name = $im.Name })
+                }
+            }
+        }
+    }
+
+    return ($results | Sort-Object SizeBytes -Descending)
+}
+
+function Get-FileSortCategory {
+    param([string]$Extension)
+    $ext = $Extension.ToLower()
+    switch ($ext) {
+        { $_ -in @('.exe', '.msi', '.msix', '.appx', '.iso', '.bat') } { return "Installers" }
+        { $_ -in @('.zip', '.rar', '.7z', '.tar', '.gz', '.xz') }     { return "Archives" }
+        { $_ -in @('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.svg', '.ico') } { return "Images" }
+        { $_ -in @('.mp4', '.mkv', '.avi', '.mov', '.webm', '.wmv') }  { return "Videos" }
+        { $_ -in @('.mp3', '.wav', '.flac', '.m4a', '.ogg', '.aac') }  { return "Audio" }
+        { $_ -in @('.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.csv', '.md') } { return "Documents" }
+        { $_ -in @('.ps1', '.py', '.js', '.ts', '.dart', '.json', '.html', '.css', '.sql', '.cs') } { return "Code_Scripts" }
+        default { return $null }
+    }
+}
+
+function Move-FileToSortedCategory {
+    param([string]$FilePath)
+    if ([string]::IsNullOrWhiteSpace($FilePath) -or -not (Test-Path -LiteralPath $FilePath)) { return $null }
+    try {
+        $fi = Get-Item -LiteralPath $FilePath -Force -ErrorAction SilentlyContinue
+        if (-not $fi -or $fi.PSIsContainer) { return $null }
+        # Never move shortcuts, partial browser downloads, or system files
+        if ($fi.Extension -in @('.lnk', '.url', '.ini', '.tmp', '.crdownload', '.part', '.opdownload')) { return $null }
+        $cat = Get-FileSortCategory $fi.Extension
+        if (-not $cat) { return $null }
+
+        $parentDir = Split-Path -Parent $FilePath
+        $destDir = Join-Path (Join-Path $parentDir "Sorted") $cat
+        if (-not (Test-Path -LiteralPath $destDir)) {
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+        }
+
+        $destPath = Join-Path $destDir $fi.Name
+        if (Test-Path -LiteralPath $destPath) {
+            $base = [System.IO.Path]::GetFileNameWithoutExtension($fi.Name)
+            $ext  = $fi.Extension
+            $n = 1
+            while (Test-Path -LiteralPath $destPath) {
+                $destPath = Join-Path $destDir "$base ($n)$ext"
+                $n++
+            }
+        }
+        Move-Item -LiteralPath $FilePath -Destination $destPath -Force -ErrorAction Stop
+        return [PSCustomObject]@{ File = $fi.Name; Category = $cat; Dest = $destPath }
+    } catch {
+        return $null
+    }
+}
+
+# ============================================================================
 # 10. WPF XAML INTERFACE (DARK OBSIDIAN NOC MODE - 90/8/2 ENTERPRISE DISCIPLINE)
 # ============================================================================
 [xml]$xaml = @"
@@ -2343,6 +2680,8 @@ function Invoke-PCSpeedBoost {
                     <Button x:Name="NavBtnHunter" DockPanel.Dock="Top" Content="4. Custom Target Hunter" Style="{StaticResource NavButton}"/>
                     <Button x:Name="NavBtnSnapshot" DockPanel.Dock="Top" Content="5. Install Snapshot Tracker" Style="{StaticResource NavButton}"/>
                     <Button x:Name="NavBtnBoost" DockPanel.Dock="Top" Content="6. PC Speed Boost" Style="{StaticResource NavButton}"/>
+                    <Button x:Name="NavBtnBloatRadar" DockPanel.Dock="Top" Content="7. Dev &amp; Gamer Radar" Style="{StaticResource NavButton}"/>
+                    <Button x:Name="NavBtnWatchdog" DockPanel.Dock="Top" Content="8. Auto-Sort Watchdog" Style="{StaticResource NavButton}"/>
 
                     <Border DockPanel.Dock="Top" Background="{DynamicResource BorderBrush}" Height="1" Margin="4,12"/>
 
@@ -2377,7 +2716,7 @@ function Invoke-PCSpeedBoost {
             <!-- ============================================================ -->
             <!-- CENTER PANE: MULTI-VIEW WORKSPACE                            -->
             <!-- ============================================================ -->
-            <Border Grid.Column="1" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,10,0">
+            <Border x:Name="PaneCenterWorkspace" Grid.Column="1" Grid.ColumnSpan="1" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,10,0">
                 <Grid>
                     <!-- ==================================================== -->
                     <!-- VIEW 1: INSTALLED DESKTOP APPLICATIONS               -->
@@ -2834,6 +3173,208 @@ function Invoke-PCSpeedBoost {
                             <Button x:Name="BtnBoostNow" Grid.Column="2" Content="⚡ Boost Now!" Style="{StaticResource BtnPrimary}" Padding="14,8"/>
                         </Grid>
                     </Grid>
+
+                    <!-- ============================================================ -->
+                    <!-- VIEW 7: DEV & GAMER BLOAT RADAR                              -->
+                    <!-- ============================================================ -->
+                    <Grid x:Name="ViewBloatRadar" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Header -->
+                        <StackPanel Grid.Row="0" Margin="0,0,0,10">
+                            <TextBlock Text="DEV &amp; GAMER BLOAT RADAR (STALE PROJECTS, DHASH DUPLICATES &amp; SHADER CACHE)" Foreground="{DynamicResource PrimaryInk}" FontSize="13" FontWeight="Bold"/>
+                            <TextBlock Text="Hunt down multi-GB stale node_modules, .dart_tool, .gradle, build folders, Steam/GPU caches, orphaned installers &amp; perceptual duplicate photos."
+                                       Foreground="{DynamicResource MutedInk}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                        </StackPanel>
+
+                        <!-- Scan Controls & Filters -->
+                        <Border Grid.Row="1" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Grid Grid.Row="0" Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="SCAN ROOT (Optional):" Foreground="{DynamicResource SecondaryInk}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox x:Name="TxtRadarRoot" Grid.Column="1" ToolTip="Leave blank to auto-scan Desktop, Downloads, Documents, source, Projects &amp; D:\ drive" Margin="0,0,8,0"/>
+                                    <Button x:Name="BtnRadarBrowse" Grid.Column="2" Content="Browse..." Style="{StaticResource BtnSecondary}" Margin="0,0,10,0"/>
+                                    <TextBlock Grid.Column="3" Text="Stale Days:" Foreground="{DynamicResource SecondaryInk}" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                    <TextBox x:Name="TxtRadarStaleDays" Grid.Column="4" Text="14" Width="46" TextAlignment="Center"/>
+                                </Grid>
+                                <Grid Grid.Row="1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <CheckBox x:Name="ChkRadarDev" Content="Dev Bloat (node_modules/.gradle/build)" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" IsChecked="True" Margin="0,0,14,0"/>
+                                        <CheckBox x:Name="ChkRadarGamer" Content="Gamer &amp; GPU Caches" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" IsChecked="True" Margin="0,0,14,0"/>
+                                        <CheckBox x:Name="ChkRadarInstallers" Content="Orphaned Installers" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" IsChecked="True" Margin="0,0,14,0"/>
+                                        <CheckBox x:Name="ChkRadarDups" Content="Duplicate Media (SHA256 + dHash)" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" IsChecked="True"/>
+                                    </StackPanel>
+                                    <Button x:Name="BtnRunBloatRadar" Grid.Column="1" Content="📡 Launch Bloat Radar Scan" Style="{StaticResource BtnPrimary}" Padding="14,7"/>
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <!-- Radar Status & Selection Bar -->
+                        <Grid Grid.Row="2" Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="TxtRadarStatus" Grid.Column="0" Text="Ready — Click 'Launch Bloat Radar Scan' to detect hidden multi-GB bloat."
+                                       Foreground="{DynamicResource AccentCyan}" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <Button x:Name="BtnRadarSelStale" Grid.Column="1" Content="Select Stale/Safe" Style="{StaticResource BtnSecondary}" Padding="8,4" Margin="0,0,6,0" FontSize="11"/>
+                            <Button x:Name="BtnRadarSelNone" Grid.Column="2" Content="None" Style="{StaticResource BtnSecondary}" Padding="8,4" Margin="0,0,6,0" FontSize="11"/>
+                            <TextBlock x:Name="TxtRadarSelectedSize" Grid.Column="3" Text="Selected: 0 KB" Foreground="#22C55E" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                        </Grid>
+
+                        <!-- Results DataGrid -->
+                        <DataGrid x:Name="GridBloatRadar" Grid.Row="3" AutoGenerateColumns="False" HeadersVisibility="Column"
+                                  Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" GridLinesVisibility="Horizontal" RowHeight="28">
+                            <DataGrid.Columns>
+                                <DataGridCheckBoxColumn Header="✓" Binding="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="34"/>
+                                <DataGridTextColumn Header="CATEGORY" Binding="{Binding Category}" Width="165" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="STATUS / AGE" Binding="{Binding StatusTag}" Width="135" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="SIZE" Binding="{Binding SizeDisplay}" Width="90" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="TARGET PATH" Binding="{Binding TargetPath}" Width="*" IsReadOnly="True"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <!-- Footer Action -->
+                        <Grid Grid.Row="4" Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="✓ Safe Guard: Active projects (&lt; Stale Days) &amp; visual near-duplicates (dHash) are left unchecked by default for your review."
+                                       Foreground="{DynamicResource MutedInk}" FontSize="10.5" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                            <Button x:Name="BtnCleanBloatRadar" Grid.Column="1" Content="🧹 Clean Selected Bloat Items" Style="{StaticResource BtnDanger}" Padding="16,8"/>
+                        </Grid>
+                    </Grid>
+
+                    <!-- ============================================================ -->
+                    <!-- VIEW 8: AUTO-SORT WATCHDOG                                   -->
+                    <!-- ============================================================ -->
+                    <Grid x:Name="ViewWatchdog" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Header -->
+                        <StackPanel Grid.Row="0" Margin="0,0,0,10">
+                            <TextBlock Text="AUTO-SORT WATCHDOG (REAL-TIME DESKTOP &amp; DOWNLOADS ORGANIZER)" Foreground="{DynamicResource PrimaryInk}" FontSize="13" FontWeight="Bold"/>
+                            <TextBlock Text="Automatically categorizes messy Desktop &amp; Downloads files into clean Sorted\ subfolders (Installers, Archives, Images, Videos, Documents, Code_Scripts) in real time."
+                                       Foreground="{DynamicResource MutedInk}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                        </StackPanel>
+
+                        <!-- Watchdog Status & Controls Card -->
+                        <Border Grid.Row="1" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,0,0,10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                        <TextBlock Text="WATCHDOG STATUS: " Foreground="{DynamicResource MutedInk}" FontSize="11" FontWeight="Bold" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtWatchdogState" Text="STOPPED" Foreground="#F59E0B" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                                        <TextBlock x:Name="TxtWatchdogMoved" Text="Files Sorted: 0" Foreground="{DynamicResource AccentCyan}" FontSize="11.5" FontWeight="Bold" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <CheckBox x:Name="ChkWatchDownloads" Content="Watch Downloads Folder" Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True" Margin="0,0,16,0"/>
+                                        <CheckBox x:Name="ChkWatchDesktop" Content="Watch Desktop Folder (Skips .lnk shortcuts)" Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="False"/>
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <Button x:Name="BtnWatchdogSortNow" Grid.Column="1" Content="📂 Sort Existing Files Now" Style="{StaticResource BtnSecondary}" Margin="0,0,8,0" Padding="14,8"/>
+                                <Button x:Name="BtnWatchdogToggle" Grid.Column="2" Content="▶ Start Real-Time Watchdog" Style="{StaticResource BtnPrimary}" Padding="14,8"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- Category Rules + Live Activity Log -->
+                        <Grid Grid.Row="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="290"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Left: Category Mapping Card -->
+                            <Border Grid.Column="0" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,8,0">
+                                <StackPanel>
+                                    <TextBlock Text="AUTO-SORT CATEGORY RULES" Foreground="{DynamicResource AccentCyan}" FontSize="10" FontWeight="Bold" Margin="0,0,0,8"/>
+                                    <TextBlock Text="• Sorted\Installers" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" FontWeight="SemiBold"/>
+                                    <TextBlock Text="  .exe, .msi, .msix, .appx, .iso, .bat" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,6"/>
+
+                                    <TextBlock Text="• Sorted\Archives" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" FontWeight="SemiBold"/>
+                                    <TextBlock Text="  .zip, .rar, .7z, .tar, .gz, .xz" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,6"/>
+
+                                    <TextBlock Text="• Sorted\Images" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" FontWeight="SemiBold"/>
+                                    <TextBlock Text="  .png, .jpg, .jpeg, .webp, .gif, .svg" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,6"/>
+
+                                    <TextBlock Text="• Sorted\Videos &amp; Audio" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" FontWeight="SemiBold"/>
+                                    <TextBlock Text="  .mp4, .mkv, .mov, .mp3, .wav, .flac" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,6"/>
+
+                                    <TextBlock Text="• Sorted\Documents" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" FontWeight="SemiBold"/>
+                                    <TextBlock Text="  .pdf, .docx, .xlsx, .pptx, .txt, .csv" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,6"/>
+
+                                    <TextBlock Text="• Sorted\Code_Scripts" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" FontWeight="SemiBold"/>
+                                    <TextBlock Text="  .ps1, .py, .js, .ts, .dart, .json, .sql" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,6"/>
+
+                                    <Border Background="{DynamicResource BorderBrush}" Height="1" Margin="0,6"/>
+                                    <TextBlock Text="✓ Safely ignores .lnk shortcuts, folders, and active downloads (.crdownload / .part / .tmp)." Foreground="#22C55E" FontSize="10" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Right: Live Watchdog Log -->
+                            <Border Grid.Column="1" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Text="LIVE WATCHDOG ACTIVITY LOG" Foreground="{DynamicResource AccentCyan}" FontSize="10" FontWeight="Bold" Margin="0,0,0,6"/>
+                                    <TextBox x:Name="TxtWatchdogLog" Grid.Row="1"
+                                             Background="Transparent"
+                                             Foreground="{DynamicResource PrimaryInk}"
+                                             BorderThickness="0"
+                                             FontFamily="Consolas"
+                                             FontSize="11.5"
+                                             IsReadOnly="True"
+                                             TextWrapping="Wrap"
+                                             AcceptsReturn="True"
+                                             VerticalScrollBarVisibility="Auto"
+                                             HorizontalScrollBarVisibility="Disabled"
+                                             VerticalContentAlignment="Top"
+                                             Text="[Watchdog] Ready. Click 'Sort Existing Files Now' or 'Start Real-Time Watchdog'.&#x0a;"/>
+                                </Grid>
+                            </Border>
+                        </Grid>
+
+                        <TextBlock Grid.Row="3" Text="✓ Collision-Safe: Existing files are never overwritten — duplicates are auto-renamed (e.g. file (1).pdf)."
+                                   Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,8,0,0"/>
+                    </Grid>
                 </Grid>
             </Border>
 
@@ -3149,14 +3690,23 @@ function Update-InspectorCounters {
 # ============================================================================
 function Switch-WorkspaceView {
     param([string]$ViewName)
-    $views = @('ViewInstalledApps', 'ViewStoreApps', 'ViewGhostSweeper', 'ViewCustomHunter', 'ViewSnapshotTracker', 'ViewPCBoost')
+    $views = @('ViewInstalledApps', 'ViewStoreApps', 'ViewGhostSweeper', 'ViewCustomHunter', 'ViewSnapshotTracker', 'ViewPCBoost', 'ViewBloatRadar', 'ViewWatchdog')
     foreach ($v in $views) {
         $Controls[$v].Visibility = if ($v -eq $ViewName) { 'Visible' } else { 'Collapsed' }
     }
     if ($ViewName -eq 'ViewPCBoost') {
+        [System.Windows.Controls.Grid]::SetColumnSpan($Controls['PaneCenterWorkspace'], 1)
+        $Controls['PaneCenterWorkspace'].Margin = [System.Windows.Thickness]::new(0,0,10,0)
         $Controls['PaneRightInspector'].Visibility  = 'Collapsed'
         $Controls['PaneRightBoostIntel'].Visibility = 'Visible'
+    } elseif ($ViewName -in @('ViewBloatRadar', 'ViewWatchdog')) {
+        [System.Windows.Controls.Grid]::SetColumnSpan($Controls['PaneCenterWorkspace'], 2)
+        $Controls['PaneCenterWorkspace'].Margin = [System.Windows.Thickness]::new(0,0,0,0)
+        $Controls['PaneRightInspector'].Visibility  = 'Collapsed'
+        $Controls['PaneRightBoostIntel'].Visibility = 'Collapsed'
     } else {
+        [System.Windows.Controls.Grid]::SetColumnSpan($Controls['PaneCenterWorkspace'], 1)
+        $Controls['PaneCenterWorkspace'].Margin = [System.Windows.Thickness]::new(0,0,10,0)
         $Controls['PaneRightInspector'].Visibility  = 'Visible'
         $Controls['PaneRightBoostIntel'].Visibility = 'Collapsed'
     }
@@ -3186,6 +3736,8 @@ $Controls['NavBtnBoost'].Add_Click({
     Update-BoostRamTelemetry -UpdateRing $isIdle
     Update-BoostCommandCenter
 })
+$Controls['NavBtnBloatRadar'].Add_Click({ Switch-WorkspaceView 'ViewBloatRadar' })
+$Controls['NavBtnWatchdog'].Add_Click({ Switch-WorkspaceView 'ViewWatchdog' })
 
 $Script:CurrentAppFilterCategory = "ALL"
 $Script:CurrentSortMode = "NAME_ASC"
@@ -3627,6 +4179,241 @@ function Set-BoostPreset {
 $Controls['BtnPresetSafe'].Add_Click({ Set-BoostPreset 'SAFE' })
 $Controls['BtnPresetGaming'].Add_Click({ Set-BoostPreset 'GAMING' })
 $Controls['BtnPresetMax'].Add_Click({ Set-BoostPreset 'MAX' })
+
+# ============================================================================
+# 13C. DEV & GAMER BLOAT RADAR + AUTO-SORT WATCHDOG HANDLERS
+# ============================================================================
+function Update-RadarSelectedSize {
+    $sum = [int64]0
+    $cnt = 0
+    foreach ($it in $Script:BloatRadarItems) {
+        if ($it.IsSelected) { $sum += $it.SizeBytes; $cnt++ }
+    }
+    $Controls['TxtRadarSelectedSize'].Text = "Selected: $(Format-ByteSize $sum) ($cnt items)"
+}
+
+$Controls['BtnRadarBrowse'].Add_Click({
+    $fbd = New-Object System.Windows.Forms.FolderBrowserDialog
+    $fbd.Description = "Select Dev Projects or Drive Folder to Scan"
+    if ($fbd.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $Controls['TxtRadarRoot'].Text = $fbd.SelectedPath
+    }
+})
+
+$Controls['BtnRunBloatRadar'].Add_Click({
+    $Controls['BtnRunBloatRadar'].IsEnabled = $false
+    $Controls['BtnCleanBloatRadar'].IsEnabled = $false
+    $Script:BloatRadarItems.Clear()
+    $Controls['GridBloatRadar'].ItemsSource = $Script:BloatRadarItems
+
+    $staleDays = 14
+    [void][int]::TryParse($Controls['TxtRadarStaleDays'].Text, [ref]$staleDays)
+    if ($staleDays -lt 1) { $staleDays = 1 }
+
+    $cb = {
+        param($msg)
+        $Controls['TxtRadarStatus'].Text = $msg
+        Invoke-BoostUiPump
+    }
+
+    $found = Invoke-BloatRadarScan `
+        -CustomRoot $Controls['TxtRadarRoot'].Text.Trim() `
+        -StaleDays $staleDays `
+        -ScanDev $Controls['ChkRadarDev'].IsChecked `
+        -ScanGamer $Controls['ChkRadarGamer'].IsChecked `
+        -ScanInstallers $Controls['ChkRadarInstallers'].IsChecked `
+        -ScanDuplicates $Controls['ChkRadarDups'].IsChecked `
+        -StatusCallback $cb
+
+    $totalBytes = [int64]0
+    foreach ($r in $found) {
+        $Script:BloatRadarItems.Add($r)
+        $totalBytes += $r.SizeBytes
+    }
+    $Controls['TxtRadarStatus'].Text = "Scan Complete — Found $($Script:BloatRadarItems.Count) items totaling $(Format-ByteSize $totalBytes)"
+    Update-RadarSelectedSize
+    $Controls['BtnRunBloatRadar'].IsEnabled = $true
+    $Controls['BtnCleanBloatRadar'].IsEnabled = $true
+})
+
+$Controls['BtnRadarSelStale'].Add_Click({
+    foreach ($it in $Script:BloatRadarItems) {
+        $it.IsSelected = ($it.StatusTag -match 'STALE|SAFE CACHE|ORPHAN|DUP OF')
+    }
+    $Controls['GridBloatRadar'].Items.Refresh()
+    Update-RadarSelectedSize
+})
+
+$Controls['BtnRadarSelNone'].Add_Click({
+    foreach ($it in $Script:BloatRadarItems) { $it.IsSelected = $false }
+    $Controls['GridBloatRadar'].Items.Refresh()
+    Update-RadarSelectedSize
+})
+
+$Controls['GridBloatRadar'].Add_CellEditEnding({
+    $Window.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [action]{ Update-RadarSelectedSize }) | Out-Null
+})
+
+$Controls['BtnCleanBloatRadar'].Add_Click({
+    $toClean = @($Script:BloatRadarItems | Where-Object { $_.IsSelected })
+    if ($toClean.Count -eq 0) {
+        [System.Windows.MessageBox]::Show($Window, "No items selected to clean.", "NovaGen // Bloat Radar", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information) | Out-Null
+        return
+    }
+    $selBytes = ($toClean | Measure-Object -Property SizeBytes -Sum).Sum
+    $confirm = [System.Windows.MessageBox]::Show(
+        $Window,
+        "Permanently delete $($toClean.Count) selected bloat item(s) ($(Format-ByteSize $selBytes))?`n`nOS directories are hardware-whitelisted and protected.",
+        "NovaGen // Bloat Radar Clean",
+        [System.Windows.MessageBoxButton]::YesNo,
+        [System.Windows.MessageBoxImage]::Warning
+    )
+    if ($confirm -ne [System.Windows.MessageBoxResult]::Yes) { return }
+
+    $freedTotal = [int64]0
+    $removedList = New-Object System.Collections.Generic.List[PSObject]
+    foreach ($item in $toClean) {
+        $Controls['TxtRadarStatus'].Text = "Cleaning: $($item.TargetPath)"
+        Invoke-BoostUiPump
+        if (Test-IsProtectedPath $item.TargetPath) { continue }
+        try {
+            if ($item.ItemType -eq "FILE") {
+                if (Test-Path -LiteralPath $item.TargetPath) {
+                    $sz = (Get-Item -LiteralPath $item.TargetPath -Force).Length
+                    Remove-Item -LiteralPath $item.TargetPath -Force -ErrorAction Stop
+                    $freedTotal += $sz
+                    $removedList.Add($item)
+                }
+            } elseif ($item.ItemType -eq "DIR_CONTENTS") {
+                $freedTotal += Invoke-BoostCleanPath -Path $item.TargetPath -DryRun $false -Label "Radar"
+                $removedList.Add($item)
+            } else {
+                if (Test-Path -LiteralPath $item.TargetPath) {
+                    $before = Get-DirectorySizeFast $item.TargetPath
+                    Remove-Item -LiteralPath $item.TargetPath -Recurse -Force -ErrorAction SilentlyContinue
+                    $after = if (Test-Path -LiteralPath $item.TargetPath) { Get-DirectorySizeFast $item.TargetPath } else { [int64]0 }
+                    $freedTotal += [Math]::Max([int64]0, $before - $after)
+                    if (-not (Test-Path -LiteralPath $item.TargetPath)) { $removedList.Add($item) }
+                }
+            }
+        } catch {}
+    }
+    foreach ($rm in $removedList) { [void]$Script:BloatRadarItems.Remove($rm) }
+    $Script:SessionReclaimedBytes += $freedTotal
+    Update-SystemTelemetry
+    Update-RadarSelectedSize
+    $Controls['TxtRadarStatus'].Text = "Clean Complete — Reclaimed $(Format-ByteSize $freedTotal)!"
+})
+
+# ---- AUTO-SORT WATCHDOG HANDLERS ----
+function Write-WatchdogLog {
+    param([string]$Msg)
+    $ts = Get-Date -Format "HH:mm:ss"
+    try {
+        $Controls['TxtWatchdogLog'].AppendText("[$ts] $Msg`r`n")
+        $Controls['TxtWatchdogLog'].CaretIndex = $Controls['TxtWatchdogLog'].Text.Length
+        $Controls['TxtWatchdogLog'].ScrollToEnd()
+    } catch {}
+}
+
+function Invoke-OrganizeFolderNow {
+    param([string]$FolderPath)
+    if (-not (Test-Path -LiteralPath $FolderPath)) { return 0 }
+    $moved = 0
+    Get-ChildItem -LiteralPath $FolderPath -File -ErrorAction SilentlyContinue | ForEach-Object {
+        $res = Move-FileToSortedCategory $_.FullName
+        if ($res) {
+            $moved++
+            $Script:WatchdogMovedCount++
+            $Controls['TxtWatchdogMoved'].Text = "Files Sorted: $($Script:WatchdogMovedCount)"
+            Write-WatchdogLog "Sorted [$($res.Category)] -> $($res.File)"
+            Invoke-BoostUiPump
+        }
+    }
+    return $moved
+}
+
+$Controls['BtnWatchdogSortNow'].Add_Click({
+    $tot = 0
+    if ($Controls['ChkWatchDownloads'].IsChecked) {
+        Write-WatchdogLog "Scanning Downloads for unsorted files..."
+        $tot += Invoke-OrganizeFolderNow "$env:USERPROFILE\Downloads"
+    }
+    if ($Controls['ChkWatchDesktop'].IsChecked) {
+        Write-WatchdogLog "Scanning Desktop for unsorted files (shortcuts preserved)..."
+        $tot += Invoke-OrganizeFolderNow "$env:USERPROFILE\Desktop"
+    }
+    Write-WatchdogLog "Instant Sort Complete: $tot file(s) organized into Sorted\ subfolders."
+})
+
+function Stop-AutoSortWatchdog {
+    foreach ($w in $Script:WatchdogWatchers) {
+        try { $w.EnableRaisingEvents = $false; $w.Dispose() } catch {}
+    }
+    $Script:WatchdogWatchers.Clear()
+    if ($Script:WatchdogTimer) {
+        try { $Script:WatchdogTimer.Stop() } catch {}
+    }
+    $Script:WatchdogRunning = $false
+    $Controls['TxtWatchdogState'].Text = "STOPPED"
+    $Controls['TxtWatchdogState'].Foreground = [Windows.Media.Brushes]::Orange
+    $Controls['BtnWatchdogToggle'].Content = "▶ Start Real-Time Watchdog"
+    Write-WatchdogLog "Watchdog stopped."
+}
+
+$Controls['BtnWatchdogToggle'].Add_Click({
+    if ($Script:WatchdogRunning) {
+        Stop-AutoSortWatchdog
+        return
+    }
+    $watchPaths = New-Object System.Collections.Generic.List[string]
+    if ($Controls['ChkWatchDownloads'].IsChecked -and (Test-Path "$env:USERPROFILE\Downloads")) { $watchPaths.Add("$env:USERPROFILE\Downloads") }
+    if ($Controls['ChkWatchDesktop'].IsChecked -and (Test-Path "$env:USERPROFILE\Desktop"))   { $watchPaths.Add("$env:USERPROFILE\Desktop") }
+    if ($watchPaths.Count -eq 0) {
+        [System.Windows.MessageBox]::Show($Window, "Select at least Downloads or Desktop to watch.", "NovaGen // Auto-Sort Watchdog", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information) | Out-Null
+        return
+    }
+
+    foreach ($wp in $watchPaths) {
+        $fsw = New-Object System.IO.FileSystemWatcher($wp)
+        $fsw.IncludeSubdirectories = $false
+        $fsw.NotifyFilter = [System.IO.NotifyFilters]::FileName -bor [System.IO.NotifyFilters]::LastWrite
+        $onEvent = {
+            param($s, $e)
+            if ($e.FullPath) { $Script:WatchdogQueue.Enqueue($e.FullPath) }
+        }
+        Register-ObjectEvent -InputObject $fsw -EventName Created -MessageData $Script:WatchdogQueue -Action { $Event.MessageData.Enqueue($Event.SourceEventArgs.FullPath) } | Out-Null
+        Register-ObjectEvent -InputObject $fsw -EventName Renamed -MessageData $Script:WatchdogQueue -Action { $Event.MessageData.Enqueue($Event.SourceEventArgs.FullPath) } | Out-Null
+        $fsw.EnableRaisingEvents = $true
+        $Script:WatchdogWatchers.Add($fsw)
+        Write-WatchdogLog "Watching real-time: $wp"
+    }
+
+    if (-not $Script:WatchdogTimer) {
+        $Script:WatchdogTimer = New-Object System.Windows.Threading.DispatcherTimer
+        $Script:WatchdogTimer.Interval = [TimeSpan]::FromSeconds(2)
+        $Script:WatchdogTimer.Add_Tick({
+            $itemPath = $null
+            while ($Script:WatchdogQueue.TryDequeue([ref]$itemPath)) {
+                $res = Move-FileToSortedCategory $itemPath
+                if ($res) {
+                    $Script:WatchdogMovedCount++
+                    $Controls['TxtWatchdogMoved'].Text = "Files Sorted: $($Script:WatchdogMovedCount)"
+                    Write-WatchdogLog "[AUTO] Sorted [$($res.Category)] -> $($res.File)"
+                }
+            }
+        })
+    }
+    $Script:WatchdogTimer.Start()
+    $Script:WatchdogRunning = $true
+    $Controls['TxtWatchdogState'].Text = "ACTIVE (WATCHING)"
+    $Controls['TxtWatchdogState'].Foreground = [Windows.Media.Brushes]::LimeGreen
+    $Controls['BtnWatchdogToggle'].Content = "⏹ Stop Watchdog"
+})
+
+$Window.Add_Closing({
+    if ($Script:WatchdogRunning) { Stop-AutoSortWatchdog }
+})
 
 # ============================================================================
 # 13. CORE UNINSTALL & DEEP SCAN BUTTON HANDLERS
