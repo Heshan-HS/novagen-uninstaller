@@ -2013,10 +2013,17 @@ function Invoke-BloatRadarScan {
         [bool]$ScanGamer = $true,
         [bool]$ScanInstallers = $true,
         [bool]$ScanDuplicates = $true,
-        [scriptblock]$StatusCallback = $null
+        [scriptblock]$StatusCallback = $null,
+        [scriptblock]$FoundCallback = $null
     )
 
     $results = New-Object System.Collections.Generic.List[PSObject]
+    $emitItem = {
+        param($ht)
+        $obj = [PSCustomObject]$ht
+        $results.Add($obj)
+        if ($FoundCallback) { & $FoundCallback $obj }
+    }
     $now = Get-Date
     $staleCutoff = $now.AddDays(-$StaleDays)
 
@@ -2053,13 +2060,15 @@ function Invoke-BloatRadarScan {
             $queue.Enqueue(@{ Path = $r; Depth = 0 })
         }
         $visited = 0
-        while ($queue.Count -gt 0 -and $visited -lt 6000) {
+        while ($queue.Count -gt 0 -and $visited -lt 3000) {
             $cur = $queue.Dequeue()
             $curPath = $cur.Path
             $depth   = $cur.Depth
-            if ($depth -gt 5) { continue }
+            if ($depth -gt 4) { continue }
             $visited++
-            if (($visited % 120) -eq 0) { Invoke-BoostUiPump }
+            if (($visited % 100) -eq 0 -and $StatusCallback) {
+                & $StatusCallback "Scanning Dev ($visited dirs, $($results.Count) found): $curPath"
+            }
 
             $subDirs = $null
             try { $subDirs = [System.IO.Directory]::GetDirectories($curPath) } catch { continue }
@@ -2083,7 +2092,7 @@ function Invoke-BloatRadarScan {
                         $ageDays = [int]($now - $di.LastWriteTime).TotalDays
                         $isStale = ($di.LastWriteTime -lt $staleCutoff)
                         $tag = if ($isStale) { "STALE ($ageDays d)" } else { "ACTIVE ($ageDays d)" }
-                        $results.Add([PSCustomObject]@{
+                        & $emitItem @{
                             IsSelected = $isStale
                             Category   = "Dev Bloat [$name]"
                             StatusTag  = $tag
@@ -2091,7 +2100,7 @@ function Invoke-BloatRadarScan {
                             SizeDisplay= Format-ByteSize $sz
                             TargetPath = $sd
                             ItemType   = "DIR"
-                        })
+                        }
                     } catch {}
                     continue # Do NOT recurse inside node_modules / .gradle / build
                 }
@@ -2120,7 +2129,7 @@ function Invoke-BloatRadarScan {
             if (Test-Path -LiteralPath $gp.Path) {
                 $sz = Get-DirectorySizeFast $gp.Path
                 if ($sz -ge 1MB) {
-                    $results.Add([PSCustomObject]@{
+                    & $emitItem @{
                         IsSelected  = $true
                         Category    = $gp.Cat
                         StatusTag   = "SAFE CACHE"
@@ -2128,7 +2137,7 @@ function Invoke-BloatRadarScan {
                         SizeDisplay = Format-ByteSize $sz
                         TargetPath  = $gp.Path
                         ItemType    = "DIR_CONTENTS"
-                    })
+                    }
                 }
             }
         }
@@ -2145,7 +2154,7 @@ function Invoke-BloatRadarScan {
             } | ForEach-Object {
                 $ageDays = [int]($now - $_.LastWriteTime).TotalDays
                 $isOld = ($ageDays -ge $StaleDays)
-                $results.Add([PSCustomObject]@{
+                & $emitItem @{
                     IsSelected  = $isOld
                     Category    = "Installer ($($_.Extension))"
                     StatusTag   = if ($isOld) { "ORPHAN ($ageDays d)" } else { "RECENT ($ageDays d)" }
@@ -2153,7 +2162,7 @@ function Invoke-BloatRadarScan {
                     SizeDisplay = Format-ByteSize $_.Length
                     TargetPath  = $_.FullName
                     ItemType    = "FILE"
-                })
+                }
             }
         }
     }
@@ -2185,7 +2194,7 @@ function Invoke-BloatRadarScan {
                     if (-not $h) { continue }
                     if ($hashes.ContainsKey($h)) {
                         [void]$seenDupPaths.Add($f.FullName)
-                        $results.Add([PSCustomObject]@{
+                        & $emitItem @{
                             IsSelected  = $true
                             Category    = "Exact Duplicate"
                             StatusTag   = "DUP OF $($hashes[$h])"
@@ -2193,7 +2202,7 @@ function Invoke-BloatRadarScan {
                             SizeDisplay = Format-ByteSize $f.Length
                             TargetPath  = $f.FullName
                             ItemType    = "FILE"
-                        })
+                        }
                     } else {
                         $hashes[$h] = $f.Name
                     }
@@ -2217,7 +2226,7 @@ function Invoke-BloatRadarScan {
                     }
                 }
                 if ($matched) {
-                    $results.Add([PSCustomObject]@{
+                    & $emitItem @{
                         IsSelected  = $false # Keep unchecked for safety so user reviews visual match
                         Category    = "Similar Photo (dHash)"
                         StatusTag   = "NEAR $($matched.Name)"
@@ -2225,7 +2234,7 @@ function Invoke-BloatRadarScan {
                         SizeDisplay = Format-ByteSize $im.Length
                         TargetPath  = $im.FullName
                         ItemType    = "FILE"
-                    })
+                    }
                 } else {
                     $dhashList.Add([PSCustomObject]@{ Hash = $dh; Name = $im.Name })
                 }
@@ -4212,10 +4221,11 @@ $Controls['BtnRunBloatRadar'].Add_Click({
     if ($staleDays -lt 1) { $staleDays = 1 }
 
     $sync = [hashtable]::Synchronized(@{
-        Status  = "Starting background Bloat Radar scan..."
-        Done    = $false
-        Results = $null
-        Error   = $null
+        Status     = "Starting background Bloat Radar scan..."
+        Done       = $false
+        Results    = $null
+        FoundQueue = [System.Collections.Concurrent.ConcurrentQueue[PSObject]]::new()
+        Error      = $null
     })
 
     $customRoot = $Controls['TxtRadarRoot'].Text.Trim()
@@ -4250,7 +4260,8 @@ function Invoke-BloatRadarScan { ${Function:Invoke-BloatRadarScan} }
     [void]$ps.AddScript($fnDefs + @'
 try {
     $cb = { param($m); $sync.Status = $m }
-    $res = Invoke-BloatRadarScan -CustomRoot $pRoot -StaleDays $pDays -ScanDev $pDev -ScanGamer $pGamer -ScanInstallers $pInst -ScanDuplicates $pDups -StatusCallback $cb
+    $fcb = { param($it); $sync.FoundQueue.Enqueue($it) }
+    $res = Invoke-BloatRadarScan -CustomRoot $pRoot -StaleDays $pDays -ScanDev $pDev -ScanGamer $pGamer -ScanInstallers $pInst -ScanDuplicates $pDups -StatusCallback $cb -FoundCallback $fcb
     $sync.Results = @($res)
 } catch {
     $sync.Error = $_.ToString()
@@ -4264,6 +4275,16 @@ try {
     $radarTimer.Interval = [TimeSpan]::FromMilliseconds(200)
     $radarTimer.Add_Tick({
         $Controls['TxtRadarStatus'].Text = $sync.Status
+        $newAdded = $false
+        $qItem = $null
+        while ($sync.FoundQueue.TryDequeue([ref]$qItem)) {
+            if ($null -ne $qItem) {
+                $Script:BloatRadarItems.Add($qItem)
+                $newAdded = $true
+            }
+        }
+        if ($newAdded) { Update-RadarSelectedSize }
+
         if ($sync.Done) {
             $radarTimer.Stop()
             try { $ps.EndInvoke($handle) } catch {}
@@ -4272,13 +4293,12 @@ try {
             if ($sync.Error) {
                 $Controls['TxtRadarStatus'].Text = "Scan Error: $($sync.Error)"
             } else {
-                $totalBytes = [int64]0
-                foreach ($r in $sync.Results) {
-                    if ($null -ne $r) {
-                        $Script:BloatRadarItems.Add($r)
-                        $totalBytes += $r.SizeBytes
-                    }
+                # Drain any final items
+                while ($sync.FoundQueue.TryDequeue([ref]$qItem)) {
+                    if ($null -ne $qItem) { $Script:BloatRadarItems.Add($qItem) }
                 }
+                $totalBytes = ($Script:BloatRadarItems | Measure-Object -Property SizeBytes -Sum).Sum
+                if (-not $totalBytes) { $totalBytes = [int64]0 }
                 $Controls['TxtRadarStatus'].Text = "Scan Complete — Found $($Script:BloatRadarItems.Count) items totaling $(Format-ByteSize $totalBytes)"
                 Update-RadarSelectedSize
             }
