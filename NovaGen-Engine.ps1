@@ -4358,39 +4358,129 @@ $Controls['BtnCleanBloatRadar'].Add_Click({
     )
     if ($confirm -ne [System.Windows.MessageBoxResult]::Yes) { return }
 
-    $freedTotal = [int64]0
-    $removedList = New-Object System.Collections.Generic.List[PSObject]
-    foreach ($item in $toClean) {
-        $Controls['TxtRadarStatus'].Text = "Cleaning: $($item.TargetPath)"
-        Invoke-BoostUiPump
+    $Controls['BtnRunBloatRadar'].IsEnabled   = $false
+    $Controls['BtnCleanBloatRadar'].IsEnabled = $false
+
+    $syncClean = [hashtable]::Synchronized(@{
+        Status       = "Starting safe background cleanup of $($toClean.Count) items..."
+        Done         = $false
+        FreedBytes   = [int64]0
+        RemovedItems = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
+        Error        = $null
+    })
+
+    $fnCleanDefs = @"
+`$Script:ProtectedPaths = @(
+    '^C:\\Windows$',
+    '^C:\\Windows\\System32(\\|$)',
+    '^C:\\Windows\\SysWOW64(\\|$)',
+    '^C:\\Windows\\WinSxS(\\|$)',
+    '^C:\\Program Files$',
+    '^C:\\Program Files \(x86\)$'
+)
+function Test-IsProtectedPath { ${Function:Test-IsProtectedPath} }
+function Format-ByteSize { ${Function:Format-ByteSize} }
+function Get-DirectorySizeFast { ${Function:Get-DirectorySizeFast} }
+function Invoke-BoostCleanPath { ${Function:Invoke-BoostCleanPath} }
+"@
+
+    $rsC = [runspacefactory]::CreateRunspace()
+    $rsC.ApartmentState = "MTA"
+    $rsC.Open()
+    $rsC.SessionStateProxy.SetVariable("syncClean", $syncClean)
+    $rsC.SessionStateProxy.SetVariable("itemsToClean", $toClean)
+
+    $psC = [powershell]::Create()
+    $psC.Runspace = $rsC
+    [void]$psC.AddScript($fnCleanDefs + @'
+try {
+    $idx = 0
+    $tot = $itemsToClean.Count
+    foreach ($item in $itemsToClean) {
+        $idx++
+        $syncClean.Status = "Cleaning ($idx / $tot) : $($item.TargetPath)"
         if (Test-IsProtectedPath $item.TargetPath) { continue }
         try {
             if ($item.ItemType -eq "FILE") {
                 if (Test-Path -LiteralPath $item.TargetPath) {
                     $sz = (Get-Item -LiteralPath $item.TargetPath -Force).Length
                     Remove-Item -LiteralPath $item.TargetPath -Force -ErrorAction Stop
-                    $freedTotal += $sz
-                    $removedList.Add($item)
+                    $syncClean.FreedBytes = [int64]$syncClean.FreedBytes + [int64]$sz
+                    [void]$syncClean.RemovedItems.Add($item)
                 }
             } elseif ($item.ItemType -eq "DIR_CONTENTS") {
-                $freedTotal += Invoke-BoostCleanPath -Path $item.TargetPath -DryRun $false -Label "Radar"
-                $removedList.Add($item)
+                $f = Invoke-BoostCleanPath -Path $item.TargetPath -DryRun $false -Label "Radar"
+                $syncClean.FreedBytes = [int64]$syncClean.FreedBytes + [int64]$f
+                [void]$syncClean.RemovedItems.Add($item)
             } else {
                 if (Test-Path -LiteralPath $item.TargetPath) {
-                    $before = Get-DirectorySizeFast $item.TargetPath
+                    $before = [int64]$item.SizeBytes
                     Remove-Item -LiteralPath $item.TargetPath -Recurse -Force -ErrorAction SilentlyContinue
                     $after = if (Test-Path -LiteralPath $item.TargetPath) { Get-DirectorySizeFast $item.TargetPath } else { [int64]0 }
-                    $freedTotal += [Math]::Max([int64]0, $before - $after)
-                    if (-not (Test-Path -LiteralPath $item.TargetPath)) { $removedList.Add($item) }
+                    $syncClean.FreedBytes = [int64]$syncClean.FreedBytes + [Math]::Max([int64]0, ($before - $after))
+                    if (-not (Test-Path -LiteralPath $item.TargetPath)) {
+                        [void]$syncClean.RemovedItems.Add($item)
+                    }
                 }
             }
         } catch {}
     }
-    foreach ($rm in $removedList) { [void]$Script:BloatRadarItems.Remove($rm) }
-    $Script:SessionReclaimedBytes += $freedTotal
-    Update-SystemTelemetry
-    Update-RadarSelectedSize
-    $Controls['TxtRadarStatus'].Text = "Clean Complete — Reclaimed $(Format-ByteSize $freedTotal)!"
+} catch {
+    $syncClean.Error = $_.ToString()
+} finally {
+    $syncClean.Done = $true
+}
+'@)
+
+    $Script:RadarCleanJob = @{
+        Sync         = $syncClean
+        PS           = $psC
+        RS           = $rsC
+        Handle       = $psC.BeginInvoke()
+        ProcessedIdx = 0
+        Timer        = $null
+    }
+
+    $cleanTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $cleanTimer.Interval = [TimeSpan]::FromMilliseconds(180)
+    $Script:RadarCleanJob.Timer = $cleanTimer
+
+    $cleanTimer.Add_Tick({
+        $job = $Script:RadarCleanJob
+        if (-not $job) { return }
+        $s = $job.Sync
+        $Controls['TxtRadarStatus'].Text = "$($s.Status) | Reclaimed: $(Format-ByteSize $s.FreedBytes)"
+
+        $curCount = $s.RemovedItems.Count
+        while ($job.ProcessedIdx -lt $curCount) {
+            $rm = $s.RemovedItems[$job.ProcessedIdx]
+            $job.ProcessedIdx++
+            if ($null -ne $rm) { [void]$Script:BloatRadarItems.Remove($rm) }
+        }
+        Update-RadarSelectedSize
+
+        if ($s.Done) {
+            $job.Timer.Stop()
+            try { $job.PS.EndInvoke($job.Handle) } catch {}
+            try { $job.PS.Dispose(); $job.RS.Close(); $job.RS.Dispose() } catch {}
+
+            $curCount = $s.RemovedItems.Count
+            while ($job.ProcessedIdx -lt $curCount) {
+                $rm = $s.RemovedItems[$job.ProcessedIdx]
+                $job.ProcessedIdx++
+                if ($null -ne $rm) { [void]$Script:BloatRadarItems.Remove($rm) }
+            }
+
+            $Script:SessionReclaimedBytes += [int64]$s.FreedBytes
+            Update-SystemTelemetry
+            Update-RadarSelectedSize
+            $Controls['TxtRadarStatus'].Text = "Clean Complete — Reclaimed $(Format-ByteSize $s.FreedBytes)!"
+            $Controls['BtnRunBloatRadar'].IsEnabled   = $true
+            $Controls['BtnCleanBloatRadar'].IsEnabled = $true
+            $Script:RadarCleanJob = $null
+        }
+    })
+    $cleanTimer.Start()
 })
 
 # ---- AUTO-SORT WATCHDOG HANDLERS ----
