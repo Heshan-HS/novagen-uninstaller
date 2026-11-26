@@ -40,6 +40,8 @@ class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.novagen.mobile/engine"
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val pendingUninstalls = ArrayDeque<String>()
+    private val REQ_UNINSTALL = 2001
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -136,17 +138,50 @@ class MainActivity : FlutterActivity() {
                 "uninstallApp" -> {
                     val pkg = call.argument<String>("packageName") ?: ""
                     if (pkg.isNotEmpty()) {
-                        try {
-                            startActivity(Intent(Intent.ACTION_DELETE).apply {
-                                data = Uri.parse("package:$pkg")
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            })
-                        } catch (_: Exception) {}
+                        pendingUninstalls.clear()
+                        pendingUninstalls.add(pkg)
+                        launchNextUninstall()
                     }
                     result.success(true)
                 }
+                "uninstallPackages" -> {
+                    val pkgs = call.argument<List<String>>("packages") ?: emptyList()
+                    pendingUninstalls.clear()
+                    pendingUninstalls.addAll(pkgs.filter { it.isNotEmpty() })
+                    val started = launchNextUninstall()
+                    result.success(started)
+                }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun launchNextUninstall(): Boolean {
+        if (pendingUninstalls.isEmpty()) return false
+        val pkg = pendingUninstalls.removeFirst()
+        return try {
+            val intent = Intent(Intent.ACTION_DELETE, Uri.parse("package:$pkg"))
+            startActivityForResult(intent, REQ_UNINSTALL)
+            true
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:$pkg")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_UNINSTALL && pendingUninstalls.isNotEmpty()) {
+            mainHandler.postDelayed({ launchNextUninstall() }, 250)
         }
     }
 
@@ -249,10 +284,13 @@ class MainActivity : FlutterActivity() {
             "ramPercent" to ramPct,
             "totalStorage" to totalStorage,
             "availStorage" to availStorage,
+            "freeStorage" to availStorage,
             "usedStorage" to usedStorage,
             "storagePercent" to storagePct,
             "batteryPercent" to batPct,
+            "batteryLevel" to batPct,
             "batteryTempC" to tempC,
+            "batteryTemp" to tempC,
             "batteryVoltageMv" to voltMv,
             "isCharging" to isCharging,
             "deviceModel" to "${Build.MANUFACTURER} ${Build.MODEL}",

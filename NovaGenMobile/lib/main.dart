@@ -124,6 +124,9 @@ class _NovaGenDashboardState extends State<NovaGenDashboard> with WidgetsBinding
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _refreshTelemetry();
+      if (_tabIndex == 3 && _apps.isNotEmpty) {
+        _loadApps();
+      }
     }
   }
 
@@ -444,7 +447,7 @@ class _NovaGenDashboardState extends State<NovaGenDashboard> with WidgetsBinding
                       ),
                     ],
                   ),
-                  Text('$model · Android ${_telemetry['androidVersion'] ?? ''}', style: TextStyle(fontSize: 10.5, color: _muted)),
+                  Text('$model · ${_telemetry['androidVersion'] ?? ''}', style: TextStyle(fontSize: 10.5, color: _muted)),
                 ],
               ),
             ),
@@ -1510,9 +1513,9 @@ class _NovaGenDashboardState extends State<NovaGenDashboard> with WidgetsBinding
                 Expanded(
                   child: FilledButton.icon(
                     onPressed: () async {
-                      for (final a in selApps) {
-                        await _channel.invokeMethod('uninstallApp', {'packageName': a['packageName']});
-                      }
+                      final pkgs = selApps.map((a) => a['packageName'].toString()).toList();
+                      final ok = await _channel.invokeMethod<bool>('uninstallPackages', {'packages': pkgs}) ?? false;
+                      if (!ok) _showSnack('Could not launch system uninstaller.', bg: _dangerRed);
                     },
                     style: FilledButton.styleFrom(backgroundColor: _dangerRed, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
                     icon: const Icon(Icons.delete_outline_rounded, size: 17),
