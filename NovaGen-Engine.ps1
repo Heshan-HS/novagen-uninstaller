@@ -1954,7 +1954,7 @@ function Invoke-PCSpeedBoost {
 [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="NOVAGEN // ZERO-TRACE DEEP UNINSTALLER PRO v4.2"
+        Title="NOVAGEN // ZERO-TRACE DEEP UNINSTALLER PRO v4.3"
         Width="1380" Height="860" MinWidth="1120" MinHeight="720"
         WindowStartupLocation="CenterScreen"
         Background="#060B16"
@@ -2197,13 +2197,11 @@ function Invoke-PCSpeedBoost {
 
                 <!-- Brand Identity -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Border Background="#2563EB" CornerRadius="4" Width="22" Height="22" Margin="0,0,10,0">
-                        <TextBlock Text="N" Foreground="#FFFFFF" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
+                    <Image x:Name="ImgHeaderLogo" Width="26" Height="26" Margin="0,0,9,0" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"/>
                     <TextBlock Text="NOVAGEN" Foreground="#F8FAFC" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
                     <TextBlock Text=" // ZERO-TRACE DEEP UNINSTALLER PRO" Foreground="#64748B" FontWeight="SemiBold" FontSize="11.5" VerticalAlignment="Center" Margin="6,1,0,0"/>
                     <Border Background="#111C33" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="4" Padding="6,2" Margin="10,0,0,0" VerticalAlignment="Center">
-                        <TextBlock Text="ENGINE v4.2" Foreground="#22D3EE" FontFamily="Consolas" FontSize="10" FontWeight="Bold"/>
+                        <TextBlock Text="ENGINE v4.3" Foreground="#22D3EE" FontFamily="Consolas" FontSize="10" FontWeight="Bold"/>
                     </Border>
                 </StackPanel>
 
@@ -3041,19 +3039,6 @@ function Invoke-PCSpeedBoost {
 $reader = New-Object System.Xml.XmlNodeReader($xaml)
 $Window = [Windows.Markup.XamlReader]::Load($reader)
 
-foreach ($icoCandidate in @(
-    (Join-Path $PSScriptRoot "NovaGen.ico"),
-    (Join-Path $Script:AppRoot "Runtime\NovaGen.ico"),
-    (Join-Path $Script:AppRoot "NovaGen.ico")
-)) {
-    if (-not [string]::IsNullOrWhiteSpace($icoCandidate) -and (Test-Path -LiteralPath $icoCandidate)) {
-        try {
-            $Window.Icon = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]::new($icoCandidate))
-            break
-        } catch {}
-    }
-}
-
 $Controls = @{}
 $xaml.SelectNodes("//*[@*[local-name()='Name']]") | ForEach-Object {
     $cName = $_.GetAttribute("Name", "http://schemas.microsoft.com/winfx/2006/xaml")
@@ -3063,6 +3048,29 @@ $xaml.SelectNodes("//*[@*[local-name()='Name']]") | ForEach-Object {
         if ($found) {
             $Controls[$cName] = $found
         }
+    }
+}
+
+foreach ($icoCandidate in @(
+    (Join-Path $PSScriptRoot "NovaGen.ico"),
+    (Join-Path $Script:AppRoot "Runtime\NovaGen.ico"),
+    (Join-Path $Script:AppRoot "NovaGen.ico")
+)) {
+    if (-not [string]::IsNullOrWhiteSpace($icoCandidate) -and (Test-Path -LiteralPath $icoCandidate)) {
+        try {
+            $sysIco = New-Object System.Drawing.Icon($icoCandidate, 64, 64)
+            $bmpSrc = [System.Windows.Interop.Imaging]::CreateBitmapSourceFromHIcon(
+                $sysIco.Handle,
+                [System.Windows.Int32Rect]::Empty,
+                [System.Windows.Media.Imaging.BitmapSizeOptions]::FromEmptyOptions()
+            )
+            $Window.Icon = $bmpSrc
+            if ($Controls['ImgHeaderLogo']) {
+                $Controls['ImgHeaderLogo'].Source = $bmpSrc
+            }
+            $sysIco.Dispose()
+            break
+        } catch {}
     }
 }
 
