@@ -1,4 +1,5 @@
-﻿import 'dart:math' as math;
+﻿import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -25,7 +26,7 @@ class _NovaGenMobileAppState extends State<NovaGenMobileApp> {
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'NovaGen Mobile Pro',
+      title: 'NovaGen Mobile Pro v2.0',
       theme: ThemeData(
         useMaterial3: true,
         brightness: _isDark ? Brightness.dark : Brightness.light,
@@ -63,23 +64,30 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
 
   int _tabIndex = 0;
   Map<String, dynamic> _telemetry = {};
+  Map<String, dynamic> _breakdown = {};
   bool _loadingTelemetry = true;
 
   // Boost & Junk state
   bool _scanningJunk = false;
   bool _cleaningJunk = false;
   List<Map<String, dynamic>> _junkItems = [];
-  String _boostStatus = 'READY â€” Tap Scan Junk or Trim RAM';
+  String _boostStatus = 'READY — Tap Scan Junk or Trim RAM';
   int _lastFreedBytes = 0;
+
+  // Duplicates state
+  bool _scanningDups = false;
+  bool _cleaningDups = false;
+  List<Map<String, dynamic>> _dupItems = [];
+
+  // Large files / Videos state
+  bool _scanningLarge = false;
+  List<Map<String, dynamic>> _largeFiles = [];
+  bool _onlyVideosFilter = false;
 
   // Apps state
   bool _loadingApps = false;
   List<Map<String, dynamic>> _apps = [];
   String _appSearch = '';
-
-  // Large files state
-  bool _scanningLarge = false;
-  List<Map<String, dynamic>> _largeFiles = [];
 
   // Auto-Sort state
   bool _sortingDownloads = false;
@@ -100,9 +108,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _refreshTelemetry();
-    }
+    if (state == AppLifecycleState.resumed) _refreshTelemetry();
   }
 
   Color get _surface => widget.isDark ? const Color(0xFF0B1220) : Colors.white;
@@ -121,6 +127,31 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
     return '${bytes.toInt()} B';
   }
 
+  Widget _buildThumb(String? b64, IconData fallbackIcon, Color fallbackColor) {
+    if (b64 != null && b64.isNotEmpty) {
+      try {
+        final bytes = base64Decode(b64);
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.memory(bytes, width: 48, height: 48, fit: BoxFit.cover),
+        );
+      } catch (_) {}
+    }
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(color: _recessed, borderRadius: BorderRadius.circular(8), border: Border.all(color: _border)),
+      child: Icon(fallbackIcon, color: fallbackColor, size: 22),
+    );
+  }
+
+  Future<void> _openFilePreview(String path) async {
+    final ok = await _channel.invokeMethod<bool>('openFilePreview', {'path': path}) ?? false;
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No app found to preview this file.')));
+    }
+  }
+
   Future<void> _refreshTelemetry() async {
     try {
       final res = await _channel.invokeMapMethod<String, dynamic>('getTelemetry');
@@ -129,6 +160,10 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
           _telemetry = res;
           _loadingTelemetry = false;
         });
+        if (res['hasStorage'] == true && _breakdown.isEmpty) {
+          final bd = await _channel.invokeMapMethod<String, dynamic>('scanStorageBreakdown');
+          if (mounted && bd != null) setState(() => _breakdown = bd);
+        }
       }
     } catch (_) {
       if (mounted) setState(() => _loadingTelemetry = false);
@@ -142,9 +177,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
       await _refreshTelemetry();
       final freed = res?['freedMb'] ?? 0;
       final trimmed = res?['trimmedApps'] ?? 0;
-      setState(() {
-        _boostStatus = 'Trimmed $trimmed apps â€” $freed MB RAM freed!';
-      });
+      setState(() => _boostStatus = 'Trimmed $trimmed apps — $freed MB RAM freed!');
     } catch (e) {
       setState(() => _boostStatus = 'RAM trim error: $e');
     }
@@ -157,7 +190,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
     }
     setState(() {
       _scanningJunk = true;
-      _boostStatus = 'Scanning thumbnails, temp, empty folders & old APKs...';
+      _boostStatus = 'Scanning thumbnails, .trashBin, app corpses & APKs...';
       _junkItems = [];
     });
     try {
@@ -202,13 +235,53 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
     }
   }
 
+  Future<void> _scanDuplicates() async {
+    if (!(_telemetry['hasStorage'] == true)) {
+      await _channel.invokeMethod('requestStoragePermission');
+      return;
+    }
+    setState(() {
+      _scanningDups = true;
+      _dupItems = [];
+    });
+    try {
+      final raw = await _channel.invokeListMethod<dynamic>('scanDuplicates') ?? [];
+      setState(() {
+        _dupItems = raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        _scanningDups = false;
+      });
+    } catch (_) {
+      setState(() => _scanningDups = false);
+    }
+  }
+
+  Future<void> _cleanSelectedDups() async {
+    final selected = _dupItems.where((it) => it['selected'] == true).toList();
+    if (selected.isEmpty) return;
+    setState(() => _cleaningDups = true);
+    try {
+      final paths = selected.map((e) => e['path'].toString()).toList();
+      final freed = await _channel.invokeMethod<int>('cleanJunkItems', {'paths': paths}) ?? 0;
+      await _refreshTelemetry();
+      setState(() {
+        _dupItems.removeWhere((it) => it['selected'] == true);
+        _lastFreedBytes += freed;
+        _cleaningDups = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Deleted ${selected.length} duplicates — Freed ${formatBytes(freed)}')));
+      }
+    } catch (_) {
+      setState(() => _cleaningDups = false);
+    }
+  }
+
   Future<void> _loadInstalledApps() async {
     setState(() => _loadingApps = true);
     try {
       final raw = await _channel.invokeListMethod<dynamic>('scanInstalledApps') ?? [];
-      final list = raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
       setState(() {
-        _apps = list;
+        _apps = raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
         _loadingApps = false;
       });
     } catch (_) {
@@ -223,7 +296,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
     }
     setState(() => _scanningLarge = true);
     try {
-      final raw = await _channel.invokeListMethod<dynamic>('scanLargeFiles', {'minMb': 50}) ?? [];
+      final raw = await _channel.invokeListMethod<dynamic>('scanLargeFiles', {'minMb': 20}) ?? [];
       setState(() {
         _largeFiles = raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
         _scanningLarge = false;
@@ -285,32 +358,28 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('NOVAGEN MOBILE PRO', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: 0.6)),
-                Text(_telemetry['deviceModel']?.toString() ?? 'Android Optimizer v1.0',
-                    style: TextStyle(fontSize: 10.5, color: _muted)),
+                const Text('NOVAGEN MOBILE PRO v2.0', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+                Text(_telemetry['deviceModel']?.toString() ?? 'Android Ultra Optimizer', style: TextStyle(fontSize: 10.5, color: _muted)),
               ],
             ),
           ],
         ),
         actions: [
           IconButton(
-            tooltip: widget.isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+            tooltip: widget.isDark ? 'Light Mode' : 'Dark Mode',
             onPressed: widget.onToggleTheme,
             icon: Icon(widget.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded, color: _accentCyan),
           ),
-          IconButton(
-            tooltip: 'Refresh Telemetry',
-            onPressed: _refreshTelemetry,
-            icon: const Icon(Icons.refresh_rounded),
-          ),
+          IconButton(tooltip: 'Refresh', onPressed: _refreshTelemetry, icon: const Icon(Icons.refresh_rounded)),
         ],
       ),
       body: IndexedStack(
         index: _tabIndex,
         children: [
           _buildBoostTab(),
+          _buildDuplicatesTab(),
+          _buildLargeMediaTab(),
           _buildAppsTab(),
-          _buildLargeFilesTab(),
           _buildAutoSortTab(),
         ],
       ),
@@ -319,12 +388,13 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
         selectedIndex: _tabIndex,
         onDestinationSelected: (idx) {
           setState(() => _tabIndex = idx);
-          if (idx == 1 && _apps.isEmpty && !_loadingApps) _loadInstalledApps();
+          if (idx == 3 && _apps.isEmpty && !_loadingApps) _loadInstalledApps();
         },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.bolt_rounded), label: 'Boost'),
-          NavigationDestination(icon: Icon(Icons.apps_rounded), label: 'App Cache'),
-          NavigationDestination(icon: Icon(Icons.radar_rounded), label: 'Large Files'),
+          NavigationDestination(icon: Icon(Icons.control_point_duplicate_rounded), label: 'Duplicates'),
+          NavigationDestination(icon: Icon(Icons.video_library_rounded), label: 'Large Media'),
+          NavigationDestination(icon: Icon(Icons.apps_rounded), label: 'Apps'),
           NavigationDestination(icon: Icon(Icons.folder_copy_rounded), label: 'Auto-Sort'),
         ],
       ),
@@ -378,7 +448,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
                         ),
                         OutlinedButton(
                           onPressed: () => _channel.invokeMethod('openAppSettings', {'packageName': 'com.novagen.novagen_mobile'}),
-                          child: const Text('Allow Restricted (â‹®)', style: TextStyle(fontSize: 12)),
+                          child: const Text('App Info', style: TextStyle(fontSize: 12)),
                         ),
                       ],
                     ],
@@ -390,11 +460,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
           // Hero Circular Ring Card
           Container(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: _surface,
-              border: Border.all(color: _border),
-              borderRadius: BorderRadius.circular(14),
-            ),
+            decoration: BoxDecoration(color: _surface, border: Border.all(color: _border), borderRadius: BorderRadius.circular(14)),
             child: Row(
               children: [
                 TweenAnimationBuilder<double>(
@@ -404,8 +470,8 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
                   builder: (context, val, _) {
                     final color = val >= 85 ? const Color(0xFFEF4444) : (val >= 65 ? const Color(0xFFF59E0B) : _accentCyan);
                     return SizedBox(
-                      width: 112,
-                      height: 112,
+                      width: 110,
+                      height: 110,
                       child: CustomPaint(
                         painter: _RingGaugePainter(percent: val, trackColor: _border, progressColor: color),
                         child: Center(
@@ -431,7 +497,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
                       const SizedBox(height: 10),
                       _metricRow('RAM', '${formatBytes(usedRam)} / ${formatBytes(totalRam)}'),
                       _metricRow('Free Storage', '${formatBytes(availStorage)} / ${formatBytes(totalStorage)}'),
-                      _metricRow('Battery', '$batPct% Â· ${batTemp.toStringAsFixed(1)}Â°C'),
+                      _metricRow('Battery', '$batPct% · ${batTemp.toStringAsFixed(1)}°C'),
                       _metricRow('Session Cleaned', formatBytes(_lastFreedBytes)),
                     ],
                   ),
@@ -440,9 +506,34 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
             ),
           ),
 
+          if (_breakdown.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: _surface, border: Border.all(color: _border), borderRadius: BorderRadius.circular(12)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('STORAGE BREAKDOWN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: _accentCyan)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 14,
+                    runSpacing: 6,
+                    children: [
+                      _chipStat('🎬 Videos', formatBytes((_breakdown['videos'] as num?) ?? 0), const Color(0xFFEC4899)),
+                      _chipStat('🖼 Photos', formatBytes((_breakdown['images'] as num?) ?? 0), const Color(0xFF22D3EE)),
+                      _chipStat('🎵 Audio', formatBytes((_breakdown['audio'] as num?) ?? 0), const Color(0xFFA855F7)),
+                      _chipStat('📄 Docs', formatBytes((_breakdown['docs'] as num?) ?? 0), const Color(0xFFF59E0B)),
+                      _chipStat('📦 APKs', formatBytes((_breakdown['apks'] as num?) ?? 0), const Color(0xFF22C55E)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+
           const SizedBox(height: 12),
 
-          // Action Row
           Row(
             children: [
               Expanded(
@@ -473,7 +564,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('DETECTED JUNK (${_junkItems.length})', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _muted)),
+                Text('DETECTED JUNK & CORPSES (${_junkItems.length})', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _muted)),
                 Text('Selected: ${formatBytes(selBytes)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF22C55E))),
               ],
             ),
@@ -486,7 +577,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
                   value: it['selected'] == true,
                   onChanged: (v) => setState(() => it['selected'] = v ?? false),
                   dense: true,
-                  title: Text('${it['category']} Â· ${formatBytes((it['size'] as num?) ?? 0)}',
+                  title: Text('${it['category']} · ${formatBytes((it['size'] as num?) ?? 0)}',
                       style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                   subtitle: Text(it['path'].toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: _muted)),
                 ),
@@ -501,21 +592,253 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
             ),
           ] else
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(color: _surface, border: Border.all(color: _border), borderRadius: BorderRadius.circular(12)),
               child: Column(
                 children: [
-                  Icon(Icons.verified_user_rounded, size: 36, color: _accentCyan),
+                  Icon(Icons.verified_user_rounded, size: 34, color: _accentCyan),
                   const SizedBox(height: 8),
-                  const Text('100% Honest & OS-Safe Scanner', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Text('100% Honest & OS-Safe Deep Cleaner', style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 4),
-                  Text('Scans .thumbnails, temp/log files, empty folders, WhatsApp Sent/Statuses & old APKs. Never touches photos or app data without review.',
+                  Text('Detects .thumbnails, .trashBin, app leftovers (CorpseFinder), WhatsApp/Telegram cache, empty folders & old APKs.',
                       textAlign: TextAlign.center, style: TextStyle(fontSize: 11.5, color: _muted)),
                 ],
               ),
             ),
         ],
       ),
+    );
+  }
+
+  Widget _buildDuplicatesTab() {
+    final selBytes = _dupItems.where((x) => x['selected'] == true).fold<int>(0, (s, x) => s + ((x['size'] as num?)?.toInt() ?? 0));
+    final selCount = _dupItems.where((x) => x['selected'] == true).length;
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('DUPLICATE & SIMILAR PHOTO FINDER', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                    Text('SHA256 Exact + Perceptual dHash. Originals stay safe!', style: TextStyle(fontSize: 11, color: _muted)),
+                  ],
+                ),
+              ),
+              FilledButton.icon(
+                onPressed: _scanningDups ? null : _scanDuplicates,
+                style: FilledButton.styleFrom(backgroundColor: _accentBlue, foregroundColor: Colors.white),
+                icon: _scanningDups ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.control_point_duplicate_rounded, size: 18),
+                label: Text(_scanningDups ? 'Scanning...' : 'Scan Dups'),
+              ),
+            ],
+          ),
+        ),
+        if (_dupItems.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Found ${_dupItems.length} files', style: TextStyle(fontSize: 11.5, color: _muted)),
+                Text('Selected: $selCount (${formatBytes(selBytes)})', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF22C55E))),
+              ],
+            ),
+          ),
+        Expanded(
+          child: _dupItems.isEmpty
+              ? Center(child: Text('Tap "Scan Dups" to find duplicate files & similar photos.', style: TextStyle(color: _muted)))
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  itemCount: _dupItems.length,
+                  itemBuilder: (ctx, i) {
+                    final it = _dupItems[i];
+                    final isOrig = it['isOriginal'] == true;
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(color: _surface, border: Border.all(color: isOrig ? const Color(0xFF22C55E) : _border), borderRadius: BorderRadius.circular(10)),
+                      child: Row(
+                        children: [
+                          Checkbox(
+                            value: it['selected'] == true,
+                            onChanged: (v) => setState(() => it['selected'] = v ?? false),
+                          ),
+                          GestureDetector(
+                            onTap: () => _openFilePreview(it['path'].toString()),
+                            child: _buildThumb(it['thumb']?.toString(), Icons.insert_drive_file_rounded, _accentCyan),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () => _openFilePreview(it['path'].toString()),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(child: Text(it['name'].toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold))),
+                                      if (isOrig)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(color: const Color(0xFF064E3B), borderRadius: BorderRadius.circular(4)),
+                                          child: const Text('ORIGINAL', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF34D399))),
+                                        ),
+                                    ],
+                                  ),
+                                  Text('${it['type']} · ${formatBytes((it['size'] as num?) ?? 0)} · ${it['group']}',
+                                      maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10.5, color: _accentCyan)),
+                                  Text(it['path'].toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: _muted)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+        if (selCount > 0)
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _cleaningDups ? null : _cleanSelectedDups,
+                style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
+                icon: const Icon(Icons.delete_sweep_rounded),
+                label: Text(_cleaningDups ? 'Deleting...' : 'Delete $selCount Duplicates (${formatBytes(selBytes)})'),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildLargeMediaTab() {
+    final visible = _onlyVideosFilter ? _largeFiles.where((f) => f['isVideo'] == true).toList() : _largeFiles;
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('LARGE MEDIA & VIDEO EXPLORER (>20 MB)', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold)),
+                    Text('Tap ▶ Play to preview any video before deleting!', style: TextStyle(fontSize: 11, color: _muted)),
+                  ],
+                ),
+              ),
+              FilledButton.icon(
+                onPressed: _scanningLarge ? null : _scanLargeFiles,
+                style: FilledButton.styleFrom(backgroundColor: _accentBlue, foregroundColor: Colors.white),
+                icon: _scanningLarge ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.radar_rounded, size: 18),
+                label: Text(_scanningLarge ? 'Scanning...' : 'Scan >20MB'),
+              ),
+            ],
+          ),
+        ),
+        if (_largeFiles.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+            child: Row(
+              children: [
+                ChoiceChip(label: Text('All (${_largeFiles.length})'), selected: !_onlyVideosFilter, onSelected: (_) => setState(() => _onlyVideosFilter = false)),
+                const SizedBox(width: 8),
+                ChoiceChip(
+                  label: Text('Videos Only (${_largeFiles.where((x) => x['isVideo'] == true).length})'),
+                  selected: _onlyVideosFilter,
+                  onSelected: (_) => setState(() => _onlyVideosFilter = true),
+                ),
+              ],
+            ),
+          ),
+        Expanded(
+          child: visible.isEmpty
+              ? Center(child: Text('Tap "Scan >20MB" to find large videos & files.', style: TextStyle(color: _muted)))
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  itemCount: visible.length,
+                  itemBuilder: (ctx, i) {
+                    final f = visible[i];
+                    final isVid = f['isVideo'] == true;
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(color: _surface, border: Border.all(color: _border), borderRadius: BorderRadius.circular(10)),
+                      child: Row(
+                        children: [
+                          GestureDetector(
+                            onTap: () => _openFilePreview(f['path'].toString()),
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                _buildThumb(f['thumb']?.toString(), isVid ? Icons.videocam_rounded : Icons.insert_drive_file_rounded, _accentCyan),
+                                if (isVid)
+                                  Container(
+                                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20)),
+                                    child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 22),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(f['name'].toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold)),
+                                Text('${formatBytes((f['size'] as num?) ?? 0)} · ${f['ext']}', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _accentCyan)),
+                                Text(f['path'].toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: _muted)),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Play / Preview File',
+                            onPressed: () => _openFilePreview(f['path'].toString()),
+                            icon: Icon(isVid ? Icons.play_circle_fill_rounded : Icons.visibility_rounded, color: _accentCyan, size: 24),
+                          ),
+                          IconButton(
+                            tooltip: 'Delete File',
+                            icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444)),
+                            onPressed: () async {
+                              final ok = await showDialog<bool>(
+                                context: context,
+                                builder: (c) => AlertDialog(
+                                  title: const Text('Delete File?'),
+                                  content: Text('Permanently delete ${f['name']} (${formatBytes((f['size'] as num?) ?? 0)})?'),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+                                    FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Delete')),
+                                  ],
+                                ),
+                              );
+                              if (ok == true) {
+                                await _channel.invokeMethod('cleanJunkItems', {'paths': [f['path']]});
+                                setState(() {
+                                  _largeFiles.remove(f);
+                                  _lastFreedBytes += (f['size'] as num?)?.toInt() ?? 0;
+                                });
+                                _refreshTelemetry();
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 
@@ -581,7 +904,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(app['name'].toString(), style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold)),
-                                Text('${app['packageName']} Â· Total: ${formatBytes(total)}',
+                                Text('${app['packageName']} · Total: ${formatBytes(total)}',
                                     maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: _muted)),
                                 Text('Cache: ${formatBytes(cache)}', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: cache > 10485760 ? const Color(0xFFF59E0B) : _accentCyan)),
                               ],
@@ -603,76 +926,6 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
                             icon: Icon(Icons.cleaning_services_rounded, size: 20, color: _accentCyan),
                           ),
                         ],
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLargeFilesTab() {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('LARGE FILE HUNTER (> 50 MB)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                    Text('Find forgotten videos, APKs & ZIPs eating storage', style: TextStyle(fontSize: 11, color: _muted)),
-                  ],
-                ),
-              ),
-              FilledButton.icon(
-                onPressed: _scanningLarge ? null : _scanLargeFiles,
-                style: FilledButton.styleFrom(backgroundColor: _accentBlue),
-                icon: _scanningLarge ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.radar_rounded, size: 18),
-                label: Text(_scanningLarge ? 'Scanning...' : 'Scan >50MB'),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: _largeFiles.isEmpty
-              ? Center(child: Text('Tap "Scan >50MB" to inspect large files.', style: TextStyle(color: _muted)))
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  itemCount: _largeFiles.length,
-                  itemBuilder: (ctx, i) {
-                    final f = _largeFiles[i];
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 6),
-                      decoration: BoxDecoration(color: _surface, border: Border.all(color: _border), borderRadius: BorderRadius.circular(10)),
-                      child: ListTile(
-                        dense: true,
-                        title: Text('${f['name']} (${formatBytes((f['size'] as num?) ?? 0)})', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                        subtitle: Text(f['path'].toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10.5, color: _muted)),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444)),
-                          onPressed: () async {
-                            final ok = await showDialog<bool>(
-                              context: context,
-                              builder: (c) => AlertDialog(
-                                title: const Text('Delete Large File?'),
-                                content: Text('Permanently delete ${f['name']}?'),
-                                actions: [
-                                  TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-                                  FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Delete')),
-                                ],
-                              ),
-                            );
-                            if (ok == true) {
-                              await _channel.invokeMethod('cleanJunkItems', {'paths': [f['path']]});
-                              setState(() => _largeFiles.removeAt(i));
-                              _refreshTelemetry();
-                            }
-                          },
-                        ),
                       ),
                     );
                   },
@@ -739,6 +992,18 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
           Text(val, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
         ],
       ),
+    );
+  }
+
+  Widget _chipStat(String label, String val, Color dotColor) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(width: 7, height: 7, decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle)),
+        const SizedBox(width: 5),
+        Text('$label: ', style: TextStyle(fontSize: 11, color: _muted)),
+        Text(val, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+      ],
     );
   }
 }
