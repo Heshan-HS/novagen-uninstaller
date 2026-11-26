@@ -1,4 +1,4 @@
-import 'dart:math' as math;
+﻿import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -69,7 +69,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
   bool _scanningJunk = false;
   bool _cleaningJunk = false;
   List<Map<String, dynamic>> _junkItems = [];
-  String _boostStatus = 'READY — Tap Scan Junk or Trim RAM';
+  String _boostStatus = 'READY â€” Tap Scan Junk or Trim RAM';
   int _lastFreedBytes = 0;
 
   // Apps state
@@ -143,7 +143,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
       final freed = res?['freedMb'] ?? 0;
       final trimmed = res?['trimmedApps'] ?? 0;
       setState(() {
-        _boostStatus = 'Trimmed $trimmed apps — $freed MB RAM freed!';
+        _boostStatus = 'Trimmed $trimmed apps â€” $freed MB RAM freed!';
       });
     } catch (e) {
       setState(() => _boostStatus = 'RAM trim error: $e');
@@ -371,11 +371,16 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
                           onPressed: () => _channel.invokeMethod('requestStoragePermission'),
                           child: const Text('Grant All Files Access', style: TextStyle(fontSize: 12)),
                         ),
-                      if (!hasUsage)
+                      if (!hasUsage) ...[
                         FilledButton.tonal(
                           onPressed: () => _channel.invokeMethod('requestUsagePermission'),
                           child: const Text('Grant App Usage Stats', style: TextStyle(fontSize: 12)),
                         ),
+                        OutlinedButton(
+                          onPressed: () => _channel.invokeMethod('openAppSettings', {'packageName': 'com.novagen.novagen_mobile'}),
+                          child: const Text('Allow Restricted (â‹®)', style: TextStyle(fontSize: 12)),
+                        ),
+                      ],
                     ],
                   ),
                 ],
@@ -426,7 +431,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
                       const SizedBox(height: 10),
                       _metricRow('RAM', '${formatBytes(usedRam)} / ${formatBytes(totalRam)}'),
                       _metricRow('Free Storage', '${formatBytes(availStorage)} / ${formatBytes(totalStorage)}'),
-                      _metricRow('Battery', '$batPct% · ${batTemp.toStringAsFixed(1)}°C'),
+                      _metricRow('Battery', '$batPct% Â· ${batTemp.toStringAsFixed(1)}Â°C'),
                       _metricRow('Session Cleaned', formatBytes(_lastFreedBytes)),
                     ],
                   ),
@@ -452,7 +457,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
               Expanded(
                 child: FilledButton.icon(
                   onPressed: _scanningJunk ? null : _scanJunk,
-                  style: FilledButton.styleFrom(backgroundColor: _accentBlue, padding: const EdgeInsets.symmetric(vertical: 12)),
+                  style: FilledButton.styleFrom(backgroundColor: _accentBlue, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
                   icon: _scanningJunk
                       ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : const Icon(Icons.search_rounded, size: 18),
@@ -481,7 +486,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
                   value: it['selected'] == true,
                   onChanged: (v) => setState(() => it['selected'] = v ?? false),
                   dense: true,
-                  title: Text('${it['category']} · ${formatBytes((it['size'] as num?) ?? 0)}',
+                  title: Text('${it['category']} Â· ${formatBytes((it['size'] as num?) ?? 0)}',
                       style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                   subtitle: Text(it['path'].toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: _muted)),
                 ),
@@ -490,7 +495,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
             const SizedBox(height: 8),
             FilledButton.icon(
               onPressed: _cleaningJunk ? null : _cleanSelectedJunk,
-              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC2626), padding: const EdgeInsets.symmetric(vertical: 14)),
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
               icon: const Icon(Icons.delete_sweep_rounded),
               label: Text(_cleaningJunk ? 'Cleaning...' : 'Clean Selected (${formatBytes(selBytes)})'),
             ),
@@ -576,7 +581,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(app['name'].toString(), style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold)),
-                                Text('${app['packageName']} · Total: ${formatBytes(total)}',
+                                Text('${app['packageName']} Â· Total: ${formatBytes(total)}',
                                     maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: _muted)),
                                 Text('Cache: ${formatBytes(cache)}', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: cache > 10485760 ? const Color(0xFFF59E0B) : _accentCyan)),
                               ],
@@ -696,7 +701,7 @@ class _NovaGenHomePageState extends State<NovaGenHomePage> with WidgetsBindingOb
                 const SizedBox(height: 12),
                 FilledButton.icon(
                   onPressed: _sortingDownloads ? null : _sortDownloads,
-                  style: FilledButton.styleFrom(backgroundColor: _accentBlue, padding: const EdgeInsets.symmetric(vertical: 12)),
+                  style: FilledButton.styleFrom(backgroundColor: _accentBlue, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
                   icon: const Icon(Icons.folder_special_rounded),
                   label: Text(_sortingDownloads ? 'Organizing...' : 'Sort Download Folder Now'),
                 ),

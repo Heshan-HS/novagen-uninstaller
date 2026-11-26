@@ -257,13 +257,14 @@ class MainActivity : FlutterActivity() {
         val root = Environment.getExternalStorageDirectory()
         if (!root.exists()) return results
 
-        // 1. Thumbnails Cache
-        for (thumbPath in listOf("DCIM/.thumbnails", "Pictures/.thumbnails", "Movies/.thumbnails")) {
+        // 1. Thumbnails & Hidden TrashBin Cache
+        for (thumbPath in listOf("DCIM/.thumbnails", "Pictures/.thumbnails", "Movies/.thumbnails", ".trashBin", ".Trash")) {
             val f = File(root, thumbPath)
             if (f.exists() && f.isDirectory) {
                 val sz = dirSize(f)
                 if (sz > 64 * 1024L) {
-                    results.add(mapOf("category" to "Thumbnail Cache", "tag" to "SAFE CACHE", "size" to sz, "path" to f.absolutePath, "selected" to true))
+                    val label = if (thumbPath.contains("trash", true)) "Hidden Trash Bin" else "Thumbnail Cache"
+                    results.add(mapOf("category" to label, "tag" to "SAFE CACHE", "size" to sz, "path" to f.absolutePath, "selected" to true))
                 }
             }
         }
