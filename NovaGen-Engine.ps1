@@ -4221,11 +4221,11 @@ $Controls['BtnRunBloatRadar'].Add_Click({
     if ($staleDays -lt 1) { $staleDays = 1 }
 
     $sync = [hashtable]::Synchronized(@{
-        Status     = "Starting background Bloat Radar scan..."
-        Done       = $false
-        Results    = $null
-        FoundQueue = [System.Collections.Concurrent.ConcurrentQueue[PSObject]]::new()
-        Error      = $null
+        Status    = "Starting background Bloat Radar scan..."
+        Done      = $false
+        Results   = $null
+        LiveItems = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
+        Error     = $null
     })
 
     $customRoot = $Controls['TxtRadarRoot'].Text.Trim()
@@ -4260,7 +4260,7 @@ function Invoke-BloatRadarScan { ${Function:Invoke-BloatRadarScan} }
     [void]$ps.AddScript($fnDefs + @'
 try {
     $cb = { param($m); $sync.Status = $m }
-    $fcb = { param($it); $sync.FoundQueue.Enqueue($it) }
+    $fcb = { param($it); [void]$sync.LiveItems.Add($it) }
     $res = Invoke-BloatRadarScan -CustomRoot $pRoot -StaleDays $pDays -ScanDev $pDev -ScanGamer $pGamer -ScanInstallers $pInst -ScanDuplicates $pDups -StatusCallback $cb -FoundCallback $fcb
     $sync.Results = @($res)
 } catch {
@@ -4271,13 +4271,16 @@ try {
 '@)
     $handle = $ps.BeginInvoke()
 
+    $processedIdx = 0
     $radarTimer = New-Object System.Windows.Threading.DispatcherTimer
     $radarTimer.Interval = [TimeSpan]::FromMilliseconds(200)
     $radarTimer.Add_Tick({
         $Controls['TxtRadarStatus'].Text = $sync.Status
         $newAdded = $false
-        $qItem = $null
-        while ($sync.FoundQueue.TryDequeue([ref]$qItem)) {
+        $curCount = $sync.LiveItems.Count
+        while ($processedIdx -lt $curCount) {
+            $qItem = $sync.LiveItems[$processedIdx]
+            $processedIdx++
             if ($null -ne $qItem) {
                 $Script:BloatRadarItems.Add($qItem)
                 $newAdded = $true
@@ -4293,8 +4296,10 @@ try {
             if ($sync.Error) {
                 $Controls['TxtRadarStatus'].Text = "Scan Error: $($sync.Error)"
             } else {
-                # Drain any final items
-                while ($sync.FoundQueue.TryDequeue([ref]$qItem)) {
+                $curCount = $sync.LiveItems.Count
+                while ($processedIdx -lt $curCount) {
+                    $qItem = $sync.LiveItems[$processedIdx]
+                    $processedIdx++
                     if ($null -ne $qItem) { $Script:BloatRadarItems.Add($qItem) }
                 }
                 $totalBytes = ($Script:BloatRadarItems | Measure-Object -Property SizeBytes -Sum).Sum
