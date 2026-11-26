@@ -1,0 +1,8 @@
+d:\uinsitaler\NovaGenPro\obj\x64\Release\NovaGenPro.csprojResolveAssemblyReference.cache
+d:\uinsitaler\NovaGenPro\obj\x64\Release\MainWindow.baml
+d:\uinsitaler\NovaGenPro\obj\x64\Release\MainWindow.g.cs
+d:\uinsitaler\NovaGenPro\obj\x64\Release\App.g.cs
+d:\uinsitaler\NovaGenPro\obj\x64\Release\NovaGen_MarkupCompile.cache
+d:\uinsitaler\NovaGenPro\obj\x64\Release\NovaGen.g.resources
+d:\uinsitaler\NovaGenPro\bin\Release\NovaGen.exe
+d:\uinsitaler\NovaGenPro\obj\x64\Release\NovaGen.exe

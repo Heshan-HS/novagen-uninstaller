@@ -1,0 +1,1285 @@
+﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        x:Class="NovaGenPro.MainWindow"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="NOVAGEN // ZERO-TRACE DEEP UNINSTALLER PRO v5.0"
+        Width="1380" Height="860" MinWidth="1120" MinHeight="720"
+        WindowStartupLocation="CenterScreen"
+        Background="#060B16"
+        Foreground="#F8FAFC"
+        FontFamily="Segoe UI">
+
+    <Window.Resources>
+        <!-- Solid Brushes (90-8-2 Enterprise Dark Obsidian Palette) -->
+        <SolidColorBrush x:Key="CanvasBrush" Color="#060B16"/>
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#0B1220"/>
+        <SolidColorBrush x:Key="ElevatedBrush" Color="#111C33"/>
+        <SolidColorBrush x:Key="RecessedBrush" Color="#040811"/>
+        <SolidColorBrush x:Key="BorderBrush" Color="#1E293B"/>
+        <SolidColorBrush x:Key="PrimaryInk" Color="#F8FAFC"/>
+        <SolidColorBrush x:Key="SecondaryInk" Color="#94A3B8"/>
+        <SolidColorBrush x:Key="MutedInk" Color="#64748B"/>
+        <SolidColorBrush x:Key="AccentCobalt" Color="#2563EB"/>
+        <SolidColorBrush x:Key="AccentCobaltHover" Color="#1D4ED8"/>
+        <SolidColorBrush x:Key="AccentCyan" Color="#22D3EE"/>
+        <SolidColorBrush x:Key="SemanticSuccess" Color="#059669"/>
+        <SolidColorBrush x:Key="SemanticWarning" Color="#D97706"/>
+        <SolidColorBrush x:Key="SemanticDanger" Color="#DC2626"/>
+        <SolidColorBrush x:Key="SemanticDangerHover" Color="#B91C1C"/>
+
+        <!-- Primary Cobalt Button -->
+        <Style x:Key="BtnPrimary" TargetType="Button">
+            <Setter Property="Background" Value="#2563EB"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+            <Setter Property="BorderBrush" Value="#3B82F6"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="14,7"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bdr" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bdr" Property="Background" Value="#1D4ED8"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="bdr" Property="Background" Value="#1E293B"/>
+                                <Setter Property="Foreground" Value="#64748B"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Danger / Nuke Action Button -->
+        <Style x:Key="BtnDanger" TargetType="Button" BasedOn="{StaticResource BtnPrimary}">
+            <Setter Property="Background" Value="#DC2626"/>
+            <Setter Property="BorderBrush" Value="#EF4444"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bdr" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bdr" Property="Background" Value="#B91C1C"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="bdr" Property="Background" Value="#1E293B"/>
+                                <Setter Property="Foreground" Value="#64748B"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Secondary Surface Button -->
+        <Style x:Key="BtnSecondary" TargetType="Button" BasedOn="{StaticResource BtnPrimary}">
+            <Setter Property="Background" Value="{DynamicResource ElevatedBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryInk}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bdr" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bdr" Property="Background" Value="{DynamicResource BorderBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="bdr" Property="Background" Value="{DynamicResource RecessedBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource MutedInk}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Sidebar Navigation Button -->
+        <Style x:Key="NavButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryInk}"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12,10"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bdr" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6" Padding="{TemplateBinding Padding}" Margin="0,2">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bdr" Property="Background" Value="{DynamicResource ElevatedBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource PrimaryInk}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Dark TextBox -->
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="{DynamicResource RecessedBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryInk}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource AccentCyan}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <!-- Dark DataGrid Styling -->
+        <Style TargetType="DataGrid">
+            <Setter Property="Background" Value="{DynamicResource SurfaceBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryInk}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="RowBackground" Value="{DynamicResource SurfaceBrush}"/>
+            <Setter Property="AlternatingRowBackground" Value="{DynamicResource RecessedBrush}"/>
+            <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+            <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="VerticalGridLinesBrush" Value="Transparent"/>
+            <Setter Property="HeadersVisibility" Value="Column"/>
+            <Setter Property="SelectionMode" Value="Single"/>
+            <Setter Property="SelectionUnit" Value="FullRow"/>
+            <Setter Property="CanUserAddRows" Value="False"/>
+            <Setter Property="CanUserDeleteRows" Value="False"/>
+            <Setter Property="AutoGenerateColumns" Value="False"/>
+            <Setter Property="RowHeight" Value="34"/>
+            <Setter Property="FontSize" Value="12.5"/>
+        </Style>
+
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="{DynamicResource RecessedBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource MutedInk}"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="0,0,1,1"/>
+        </Style>
+
+        <Style TargetType="DataGridRow">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryInk}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource ElevatedBrush}"/>
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentCobalt}"/>
+                    <Setter Property="Foreground" Value="#FFFFFF"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="DataGridCell">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryInk}"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="DataGridCell">
+                        <Border Padding="{TemplateBinding Padding}" Background="{TemplateBinding Background}">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="Transparent"/>
+                    <Setter Property="Foreground" Value="#FFFFFF"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48"/>  <!-- Top Telemetry Bar -->
+            <RowDefinition Height="78"/>  <!-- 5-Col KPI Strip -->
+            <RowDefinition Height="*"/>   <!-- Main Operational Split -->
+            <RowDefinition Height="34"/>  <!-- Bottom Live Telemetry & Console Bar -->
+        </Grid.RowDefinitions>
+
+        <!-- ================================================================ -->
+        <!-- ROW 0: TOP TELEMETRY UTILITY BAR                                 -->
+        <!-- ================================================================ -->
+        <Border Grid.Row="0" Background="#040811" BorderBrush="#1E293B" BorderThickness="0,0,0,1" Padding="16,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Brand Identity -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Image x:Name="ImgHeaderLogo" Width="26" Height="26" Margin="0,0,9,0" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"/>
+                    <TextBlock Text="NOVAGEN" Foreground="#F8FAFC" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
+                    <TextBlock Text=" // ZERO-TRACE DEEP UNINSTALLER PRO" Foreground="#64748B" FontWeight="SemiBold" FontSize="11.5" VerticalAlignment="Center" Margin="6,1,0,0"/>
+                    <Border Background="#111C33" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="4" Padding="6,2" Margin="10,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="ENGINE v5.0" Foreground="#22D3EE" FontFamily="Consolas" FontSize="10" FontWeight="Bold"/>
+                    </Border>
+                </StackPanel>
+
+                <!-- Right Telemetry Pills & Quick Utility Actions -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border x:Name="AdminBadgeBorder" Background="#06281E" BorderBrush="#059669" BorderThickness="1" CornerRadius="10" Padding="9,3" Margin="0,0,8,0">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="AdminDot" Width="6" Height="6" Fill="#10B981" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="AdminBadgeText" Text="ADMINISTRATOR ELEVATED" Foreground="#34D399" FontSize="10" FontWeight="Bold"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Background="#0B1220" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="10" Padding="9,3" Margin="0,0,10,0">
+                        <TextBlock Text="AUTO-REG BACKUP: ON" Foreground="#94A3B8" FontSize="10" FontWeight="SemiBold"/>
+                    </Border>
+
+                    <!-- Theme Toggle Switch (Dark / Gradient Blue Light) -->
+                    <Border Background="#0B1220" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="14" Padding="3" Margin="0,0,10,0" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="BtnThemeDark" Content="🌙 DARK" Style="{StaticResource BtnSecondary}" Padding="9,3" FontSize="10" FontWeight="Bold" Margin="0,0,2,0"/>
+                            <Button x:Name="BtnThemeLight" Content="☀️ LIGHT" Style="{StaticResource BtnSecondary}" Padding="9,3" FontSize="10" FontWeight="Bold"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Button x:Name="BtnOpenBackups" Content="Backups Folder" Style="{StaticResource BtnSecondary}" Padding="10,4" FontSize="11" Margin="0,0,6,0"/>
+                    <Button x:Name="BtnRefreshAll" Content="Rescan System" Style="{StaticResource BtnPrimary}" Padding="11,4" FontSize="11"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ================================================================ -->
+        <!-- ROW 1: 5-COLUMN COMPACT KPI TELEMETRY STRIP                      -->
+        <!-- ================================================================ -->
+        <Grid Grid.Row="1" Margin="14,10,14,6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- KPI 1: Installed Apps -->
+            <Border Grid.Column="0" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,0,8,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="INSTALLED APPLICATIONS" Foreground="{DynamicResource MutedInk}" FontSize="10" FontWeight="Bold"/>
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" VerticalAlignment="Bottom">
+                        <TextBlock x:Name="KpiAppCount" Text="0" Foreground="{DynamicResource PrimaryInk}" FontFamily="Consolas" FontSize="22" FontWeight="Bold"/>
+                        <TextBlock x:Name="KpiAppSub" Text=" Win32 + Store" Foreground="{DynamicResource SecondaryInk}" FontSize="11" VerticalAlignment="Bottom" Margin="6,0,0,3"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- KPI 2: Total App Footprint -->
+            <Border Grid.Column="1" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,0,8,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="INDEXED APP FOOTPRINT" Foreground="{DynamicResource MutedInk}" FontSize="10" FontWeight="Bold"/>
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" VerticalAlignment="Bottom">
+                        <TextBlock x:Name="KpiTotalSize" Text="0.00 GB" Foreground="{DynamicResource PrimaryInk}" FontFamily="Consolas" FontSize="22" FontWeight="Bold"/>
+                        <TextBlock Text=" Registered Size" Foreground="{DynamicResource SecondaryInk}" FontSize="11" VerticalAlignment="Bottom" Margin="6,0,0,3"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- KPI 3: System C: Drive Telemetry -->
+            <Border Grid.Column="2" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,0,8,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="C: SYSTEM DRIVE FREE SPACE" Foreground="{DynamicResource MutedInk}" FontSize="10" FontWeight="Bold"/>
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" VerticalAlignment="Bottom">
+                        <TextBlock x:Name="KpiDriveFree" Text="0.00 GB" Foreground="{DynamicResource AccentCyan}" FontFamily="Consolas" FontSize="22" FontWeight="Bold"/>
+                        <TextBlock x:Name="KpiDriveSub" Text=" / 0 GB" Foreground="{DynamicResource SecondaryInk}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Bottom" Margin="4,0,0,3"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- KPI 4: Active Scan Artifacts -->
+            <Border Grid.Column="3" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,0,8,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="DETECTED LEFTOVER TRACES" Foreground="{DynamicResource MutedInk}" FontSize="10" FontWeight="Bold"/>
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" VerticalAlignment="Bottom">
+                        <TextBlock x:Name="KpiLeftoverCount" Text="0" Foreground="{DynamicResource PrimaryInk}" FontFamily="Consolas" FontSize="22" FontWeight="Bold"/>
+                        <TextBlock x:Name="KpiLeftoverSize" Text=" (0 KB selected)" Foreground="{DynamicResource SecondaryInk}" FontSize="11" VerticalAlignment="Bottom" Margin="6,0,0,3"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- KPI 5: Session Reclaimed Space -->
+            <Border Grid.Column="4" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,8">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="SESSION RECLAIMED STORAGE" Foreground="{DynamicResource MutedInk}" FontSize="10" FontWeight="Bold"/>
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" VerticalAlignment="Bottom">
+                        <TextBlock x:Name="KpiReclaimed" Text="0 KB" Foreground="{DynamicResource SemanticSuccess}" FontFamily="Consolas" FontSize="22" FontWeight="Bold"/>
+                        <TextBlock Text=" 100% Wiped" Foreground="{DynamicResource SecondaryInk}" FontSize="11" VerticalAlignment="Bottom" Margin="6,0,0,3"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ================================================================ -->
+        <!-- ROW 2: MAIN 3-PANE ENTERPRISE WORKSPACE                          -->
+        <!-- ================================================================ -->
+        <Grid Grid.Row="2" Margin="14,4,14,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="210"/> <!-- Left Navigation Sidebar -->
+                <ColumnDefinition Width="*"/>   <!-- Center Primary Workspace -->
+                <ColumnDefinition Width="430"/> <!-- Right Deep-Scan & Nuke Inspector -->
+            </Grid.ColumnDefinitions>
+
+            <!-- ============================================================ -->
+            <!-- LEFT SIDEBAR: OPERATIONAL MODES                              -->
+            <!-- ============================================================ -->
+            <Border Grid.Column="0" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,10,0">
+                <DockPanel LastChildFill="False">
+                    <TextBlock DockPanel.Dock="Top" Text="OPERATIONAL MODULES" Foreground="{DynamicResource MutedInk}" FontSize="10" FontWeight="Bold" Margin="6,4,0,8"/>
+
+                    <Button x:Name="NavBtnApps" DockPanel.Dock="Top" Content="1. Installed Applications" Style="{StaticResource NavButton}"/>
+                    <Button x:Name="NavBtnStore" DockPanel.Dock="Top" Content="2. Store &amp; Bloatware" Style="{StaticResource NavButton}"/>
+                    <Button x:Name="NavBtnGhost" DockPanel.Dock="Top" Content="3. Ghost Leftover Sweeper" Style="{StaticResource NavButton}"/>
+                    <Button x:Name="NavBtnHunter" DockPanel.Dock="Top" Content="4. Custom Target Hunter" Style="{StaticResource NavButton}"/>
+                    <Button x:Name="NavBtnSnapshot" DockPanel.Dock="Top" Content="5. Install Snapshot Tracker" Style="{StaticResource NavButton}"/>
+                    <Button x:Name="NavBtnBoost" DockPanel.Dock="Top" Content="6. PC Speed Boost" Style="{StaticResource NavButton}"/>
+                    <Button x:Name="NavBtnBloatRadar" DockPanel.Dock="Top" Content="7. Dev &amp; Gamer Radar" Style="{StaticResource NavButton}"/>
+                    <Button x:Name="NavBtnWatchdog" DockPanel.Dock="Top" Content="8. Auto-Sort Watchdog" Style="{StaticResource NavButton}"/>
+
+                    <Border DockPanel.Dock="Top" Background="{DynamicResource BorderBrush}" Height="1" Margin="4,12"/>
+
+                    <!-- Deep Scan Coverage Card -->
+                    <Border DockPanel.Dock="Top" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10">
+                        <StackPanel>
+                            <TextBlock Text="18-POINT DEEP ENGINE" Foreground="{DynamicResource AccentCyan}" FontSize="10" FontWeight="Bold" Margin="0,0,0,6"/>
+                            <TextBlock Text="• Program Files (x64 / x86)" Foreground="{DynamicResource SecondaryInk}" FontSize="11" Margin="0,1"/>
+                            <TextBlock Text="• AppData (Local/Low/Roaming)" Foreground="{DynamicResource SecondaryInk}" FontSize="11" Margin="0,1"/>
+                            <TextBlock Text="• ProgramData &amp; User .config" Foreground="{DynamicResource SecondaryInk}" FontSize="11" Margin="0,1"/>
+                            <TextBlock Text="• HKLM &amp; HKCU Software Hives" Foreground="{DynamicResource SecondaryInk}" FontSize="11" Margin="0,1"/>
+                            <TextBlock Text="• WOW6432Node &amp; VirtualStore" Foreground="{DynamicResource SecondaryInk}" FontSize="11" Margin="0,1"/>
+                            <TextBlock Text="• MSI Installer &amp; Folders Cache" Foreground="{DynamicResource SecondaryInk}" FontSize="11" Margin="0,1"/>
+                            <TextBlock Text="• MuiCache &amp; AppCompat Store" Foreground="{DynamicResource SecondaryInk}" FontSize="11" Margin="0,1"/>
+                            <TextBlock Text="• Prefetch (.pf) &amp; Temp Traces" Foreground="{DynamicResource SecondaryInk}" FontSize="11" Margin="0,1"/>
+                            <TextBlock Text="• Services, Tasks &amp; Firewall" Foreground="{DynamicResource SecondaryInk}" FontSize="11" Margin="0,1"/>
+                            <TextBlock Text="• Locked File Reboot Nuker" Foreground="{DynamicResource SecondaryInk}" FontSize="11" Margin="0,1"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Safety Shield Footer -->
+                    <Border DockPanel.Dock="Bottom" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10">
+                        <StackPanel>
+                            <TextBlock Text="OS PROTECTION GUARD" Foreground="{DynamicResource SemanticSuccess}" FontSize="10" FontWeight="Bold"/>
+                            <TextBlock Text="System32, WinSxS &amp; core Windows directories are hardware-whitelisted. Auto .reg backup runs before every wipe."
+                                       Foreground="{DynamicResource MutedInk}" FontSize="10.5" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </DockPanel>
+            </Border>
+
+            <!-- ============================================================ -->
+            <!-- CENTER PANE: MULTI-VIEW WORKSPACE                            -->
+            <!-- ============================================================ -->
+            <Border x:Name="PaneCenterWorkspace" Grid.Column="1" Grid.ColumnSpan="2" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,0">
+                <Grid>
+                    <!-- ==================================================== -->
+                    <!-- VIEW 1: INSTALLED DESKTOP APPLICATIONS               -->
+                    <!-- ==================================================== -->
+                    <Grid x:Name="ViewInstalledApps" Visibility="Visible">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Row 0: Section Header -->
+                        <StackPanel Grid.Row="0" Margin="0,0,0,8">
+                            <TextBlock Text="INSTALLED APPLICATIONS" Foreground="{DynamicResource PrimaryInk}" FontSize="13" FontWeight="Bold"/>
+                            <TextBlock Text="Select any application to perform a 100% Zero-Trace Uninstall or Deep Leftover Scan" Foreground="{DynamicResource MutedInk}" FontSize="11"/>
+                        </StackPanel>
+
+                        <!-- Row 1: Dedicated Full-Width Search & Filter Bar -->
+                        <Grid Grid.Row="1" Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Background="{DynamicResource ElevatedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1,1,0,1" CornerRadius="4,0,0,4" Padding="8,0">
+                                <TextBlock Text="SEARCH" Foreground="{DynamicResource MutedInk}" FontSize="10" FontWeight="Bold" VerticalAlignment="Center"/>
+                            </Border>
+                            <TextBox x:Name="TxtSearchApps" Grid.Column="1" Margin="0,0,8,0" ToolTip="Type application name, publisher, or install path"/>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                <Button x:Name="BtnFilterAll" Content="All" Style="{StaticResource BtnSecondary}" Padding="9,5" Margin="0,0,4,0"/>
+                                <Button x:Name="BtnFilterDesktop" Content="Desktop" Style="{StaticResource BtnSecondary}" Padding="9,5" Margin="0,0,4,0"/>
+                                <Button x:Name="BtnFilterUser" Content="User" Style="{StaticResource BtnSecondary}" Padding="9,5" Margin="0,0,4,0"/>
+                                <Button x:Name="BtnSortSize" Content="Sort: Size ↓" Style="{StaticResource BtnSecondary}" Padding="9,5" Margin="0,0,4,0" ToolTip="Sort applications by size (Largest to Smallest)"/>
+                                <Button x:Name="BtnSortName" Content="Sort: Name A-Z" Style="{StaticResource BtnSecondary}" Padding="9,5" Margin="0,0,4,0" ToolTip="Sort applications alphabetically by Name"/>
+                                <Button x:Name="BtnCalcSizes" Content="Calc Exact Sizes" Style="{StaticResource BtnSecondary}" Padding="9,5"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Row 2: Selected App Telemetry Banner -->
+                        <Border Grid.Row="2" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10,7" Margin="0,0,0,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock x:Name="LblSelectedAppName" Text="No Application Selected" Foreground="{DynamicResource AccentCyan}" FontSize="12.5" FontWeight="Bold"/>
+                                    <TextBlock x:Name="LblSelectedAppMeta" Text="Click an application row below to inspect its install path and uninstall command." Foreground="{DynamicResource MutedInk}" FontFamily="Consolas" FontSize="11" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+                                </StackPanel>
+                                <Border Grid.Column="1" Background="{DynamicResource ElevatedBrush}" CornerRadius="4" Padding="8,4" VerticalAlignment="Center">
+                                    <TextBlock x:Name="LblSelectedAppArch" Text="READY" Foreground="{DynamicResource SecondaryInk}" FontFamily="Consolas" FontSize="10.5" FontWeight="Bold"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- Row 3: Applications DataGrid -->
+                        <DataGrid x:Name="GridInstalledApps" Grid.Row="3">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="APPLICATION NAME" Binding="{Binding DisplayName}" Width="210"/>
+                                <DataGridTextColumn Header="PUBLISHER" Binding="{Binding Publisher}" Width="140"/>
+                                <DataGridTextColumn Header="VERSION" Binding="{Binding DisplayVersion}" Width="80"/>
+                                <DataGridTextColumn Header="SIZE" Binding="{Binding SizeFormatted}" Width="75"/>
+                                <DataGridTextColumn Header="ARCH" Binding="{Binding Architecture}" Width="50"/>
+                                <DataGridTextColumn Header="INSTALLED" Binding="{Binding InstallDate}" Width="85"/>
+                                <DataGridTextColumn Header="CATEGORY" Binding="{Binding Category}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <!-- Row 4: Action Footer for Selected App -->
+                        <Grid Grid.Row="4" Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                <Button x:Name="BtnOpenInstallDir" Content="Open Folder" Style="{StaticResource BtnSecondary}" Padding="10,7" Margin="0,0,6,0"/>
+                                <Button x:Name="BtnFreshResetApp" Content="Fresh Config Reset" Style="{StaticResource BtnSecondary}" Padding="10,7" ToolTip="Scans only AppData, ProgramData, MuiCache &amp; HKCU configs to reset app to fresh install state"/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                <Button x:Name="BtnDeepScanOnly" Content="Deep Scan Leftovers" Style="{StaticResource BtnPrimary}" Padding="11,7" Margin="0,0,6,0"/>
+                                <Button x:Name="BtnFullDeepUninstall" Content="100% Deep Uninstall + Wipe" Style="{StaticResource BtnDanger}" Padding="12,7"/>
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+
+                    <!-- ==================================================== -->
+                    <!-- VIEW 2: WINDOWS STORE & UWP BLOATWARE                -->
+                    <!-- ==================================================== -->
+                    <Grid x:Name="ViewStoreApps" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0" Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,14,0">
+                                <TextBlock Text="WINDOWS STORE &amp; UWP PACKAGES" Foreground="#F8FAFC" FontSize="13" FontWeight="Bold"/>
+                                <TextBlock Text="Remove pre-installed UWP apps, Microsoft Store packages, and their AppData\Local\Packages cache" Foreground="#64748B" FontSize="11"/>
+                            </StackPanel>
+                            <TextBox x:Name="TxtSearchStore" Grid.Column="1" Margin="8,0,0,0"/>
+                        </Grid>
+
+                        <DataGrid x:Name="GridStoreApps" Grid.Row="1">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="PACKAGE NAME" Binding="{Binding Name}" Width="240"/>
+                                <DataGridTextColumn Header="PUBLISHER" Binding="{Binding Publisher}" Width="160"/>
+                                <DataGridTextColumn Header="VERSION" Binding="{Binding Version}" Width="100"/>
+                                <DataGridTextColumn Header="ARCH" Binding="{Binding Architecture}" Width="65"/>
+                                <DataGridTextColumn Header="PACKAGE FAMILY" Binding="{Binding PackageFamilyName}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                            <Button x:Name="BtnScanStoreLeftovers" Content="Scan Package Cache" Style="{StaticResource BtnSecondary}" Margin="0,0,8,0"/>
+                            <Button x:Name="BtnUninstallStoreApp" Content="Deep Remove Store App + LocalState" Style="{StaticResource BtnDanger}"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- ==================================================== -->
+                    <!-- VIEW 3: GHOST LEFTOVER SWEEPER                       -->
+                    <!-- ==================================================== -->
+                    <Grid x:Name="ViewGhostSweeper" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0" Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="GHOST LEFTOVER SWEEPER (ORPHANED APPDATA &amp; PROGRAMDATA)" Foreground="#F8FAFC" FontSize="13" FontWeight="Bold"/>
+                                <TextBlock Text="Finds folders in AppData (Local, Roaming, LocalLow) and ProgramData that do not match any currently installed application" Foreground="#64748B" FontSize="11"/>
+                            </StackPanel>
+                            <Button x:Name="BtnRunGhostScan" Grid.Column="1" Content="Scan for Ghost Folders" Style="{StaticResource BtnPrimary}"/>
+                        </Grid>
+
+                        <DataGrid x:Name="GridGhostItems" Grid.Row="1">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="FOLDER NAME" Binding="{Binding FolderName}" Width="180"/>
+                                <DataGridTextColumn Header="LOCATION" Binding="{Binding Location}" Width="120"/>
+                                <DataGridTextColumn Header="SIZE" Binding="{Binding SizeFormatted}" Width="85"/>
+                                <DataGridTextColumn Header="LAST MODIFIED" Binding="{Binding LastModified}" Width="95"/>
+                                <DataGridTextColumn Header="IDLE" Binding="{Binding IdleDays}" Width="85"/>
+                                <DataGridTextColumn Header="FULL PATH" Binding="{Binding FullPath}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                            <Button x:Name="BtnSendGhostToInspector" Content="Send Selected Ghost Folder to Deep Inspector ->" Style="{StaticResource BtnPrimary}"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- ==================================================== -->
+                    <!-- VIEW 4: CUSTOM TARGET HUNTER (KEYWORD / PATH NUKER)  -->
+                    <!-- ==================================================== -->
+                    <Grid x:Name="ViewCustomHunter" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+                            <TextBlock Text="CUSTOM TARGET HUNTER (DEEP KEYWORD &amp; FOLDER NUKER)" Foreground="#F8FAFC" FontSize="13" FontWeight="Bold"/>
+                            <TextBlock Text="Hunt down portable apps, broken installations, or previously deleted software by name, publisher, or folder path across all 18 system points."
+                                       Foreground="#64748B" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                        </StackPanel>
+
+                        <Border Grid.Row="1" Background="#040811" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="8" Padding="14">
+                            <StackPanel>
+                                <TextBlock Text="1. TARGET APPLICATION OR KEYWORD (e.g. AnyDesk, Valorant, JetBrains, Adobe)" Foreground="#94A3B8" FontSize="11" FontWeight="Bold" Margin="0,0,0,4"/>
+                                <TextBox x:Name="TxtHunterKeyword" Margin="0,0,0,12"/>
+
+                                <TextBlock Text="2. OPTIONAL PUBLISHER / VENDOR NAME" Foreground="#94A3B8" FontSize="11" FontWeight="Bold" Margin="0,0,0,4"/>
+                                <TextBox x:Name="TxtHunterPublisher" Margin="0,0,0,12"/>
+
+                                <TextBlock Text="3. OPTIONAL TARGET INSTALL FOLDER OR EXE PATH" Foreground="#94A3B8" FontSize="11" FontWeight="Bold" Margin="0,0,0,4"/>
+                                <Grid Margin="0,0,0,14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="TxtHunterPath" Grid.Column="0" Margin="0,0,8,0"/>
+                                    <Button x:Name="BtnBrowseHunterPath" Grid.Column="1" Content="Browse Folder..." Style="{StaticResource BtnSecondary}"/>
+                                </Grid>
+
+                                <Button x:Name="BtnExecuteCustomHunt" Content="Launch 18-Point Deep Hunt Across C: &amp; Registry ->" Style="{StaticResource BtnPrimary}" HorizontalAlignment="Left" Padding="18,9"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- ==================================================== -->
+                    <!-- VIEW 5: INSTALL SNAPSHOT TRACKER                     -->
+                    <!-- ==================================================== -->
+                    <Grid x:Name="ViewSnapshotTracker" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+                            <TextBlock Text="INSTALL SNAPSHOT TRACKER (BEFORE / AFTER DIFF ENGINE)" Foreground="#F8FAFC" FontSize="13" FontWeight="Bold"/>
+                            <TextBlock Text="Take a baseline snapshot before installing any software. Later, compare current system state against the snapshot to reveal 100% of every new folder and registry key created."
+                                       Foreground="#64748B" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                        </StackPanel>
+
+                        <Border Grid.Row="1" Background="#040811" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,0,0,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="TxtSnapshotLabel" Grid.Column="0" Text="PreInstall_Baseline" Margin="0,0,10,0"/>
+                                <Button x:Name="BtnCreateSnapshot" Grid.Column="1" Content="Capture Baseline Snapshot Now" Style="{StaticResource BtnPrimary}"/>
+                            </Grid>
+                        </Border>
+
+                        <Border Grid.Row="2" Background="#040811" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="8" Padding="14">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="SAVED SYSTEM SNAPSHOTS" Foreground="#94A3B8" FontSize="11" FontWeight="Bold" Margin="0,0,0,8"/>
+                                <ListBox x:Name="ListSnapshots" Grid.Row="1" Background="#0B1220" Foreground="#F8FAFC" BorderBrush="#1E293B" FontFamily="Consolas" FontSize="12"/>
+                                <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                                    <Button x:Name="BtnDeleteSnapshot" Content="Delete Snapshot" Style="{StaticResource BtnSecondary}" Margin="0,0,8,0"/>
+                                    <Button x:Name="BtnCompareSnapshot" Content="Compare Snapshot &amp; Send Diff to Inspector ->" Style="{StaticResource BtnPrimary}"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
+
+                    <!-- ============================================================ -->
+                    <!-- VIEW: PC SPEED BOOST (Module 6)                              -->
+                    <!-- ============================================================ -->
+                    <Grid x:Name="ViewPCBoost" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Header -->
+                        <StackPanel Grid.Row="0" Margin="0,0,0,10">
+                            <TextBlock Text="PC SPEED BOOST ENGINE (ULTRA-ADVANCED SAFE OPTIMIZER)" Foreground="{DynamicResource PrimaryInk}" FontSize="13" FontWeight="Bold"/>
+                            <TextBlock Text="Live RAM telemetry, circular optimization gauge &amp; 12-point deep cache cleaner. Analyze first or Boost Now."
+                                       Foreground="{DynamicResource MutedInk}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                        </StackPanel>
+
+                        <!-- Hero Telemetry + Circular Progress Ring -->
+                        <Border Grid.Row="1" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14" Margin="0,0,0,10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- Circular Progress / Health Ring -->
+                                <Grid Grid.Column="0" Width="124" Height="124" Margin="0,0,18,0" VerticalAlignment="Center">
+                                    <Ellipse Width="124" Height="124" Stroke="{DynamicResource BorderBrush}" StrokeThickness="9"/>
+                                    <Path x:Name="BoostRingArc" Width="124" Height="124" Stroke="{DynamicResource AccentCyan}" StrokeThickness="9"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M 62,5 A 57,57 0 0 1 62,5"/>
+                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                        <TextBlock x:Name="TxtBoostRingPercent" Text="0%" Foreground="{DynamicResource PrimaryInk}" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtBoostRingLabel" Text="RAM USED" Foreground="{DynamicResource MutedInk}" FontSize="9" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,1,0,0"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- Right Side: Live Step, Progress Bar & 4 Metric Cards -->
+                                <Grid Grid.Column="1" VerticalAlignment="Center">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <Grid Grid.Row="0" Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock x:Name="TxtBoostActiveStep" Grid.Column="0" Text="Ready — Click Analyze or Boost Now to start live scan"
+                                                   Foreground="{DynamicResource SecondaryInk}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtBoostStatus" Grid.Column="1" Text="READY" Foreground="#22C55E" FontSize="12" FontWeight="Bold" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                                    </Grid>
+
+                                    <ProgressBar x:Name="PbBoostProgress" Grid.Row="1" Height="6" Minimum="0" Maximum="100" Value="0"
+                                                 Background="{DynamicResource BorderBrush}" Foreground="{DynamicResource AccentCyan}" BorderThickness="0" Margin="0,0,0,12"/>
+
+                                    <Grid Grid.Row="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border Grid.Column="0" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,6,0">
+                                            <StackPanel>
+                                                <TextBlock Text="SYSTEM RAM" Foreground="{DynamicResource MutedInk}" FontSize="9" FontWeight="Bold"/>
+                                                <TextBlock x:Name="TxtBoostSysRAM" Text="—" Foreground="{DynamicResource PrimaryInk}" FontSize="13" FontWeight="Bold" Margin="0,2,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Grid.Column="1" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,6,0">
+                                            <StackPanel>
+                                                <TextBlock Text="ESTIMATED SAVINGS" Foreground="{DynamicResource MutedInk}" FontSize="9" FontWeight="Bold"/>
+                                                <TextBlock x:Name="TxtBoostEstimate" Text="—" Foreground="{DynamicResource AccentCyan}" FontSize="13" FontWeight="Bold" Margin="0,2,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Grid.Column="2" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,6,0">
+                                            <StackPanel>
+                                                <TextBlock Text="RAM FREED" Foreground="{DynamicResource MutedInk}" FontSize="9" FontWeight="Bold"/>
+                                                <TextBlock x:Name="TxtBoostRAM" Text="0 MB" Foreground="#22C55E" FontSize="13" FontWeight="Bold" Margin="0,2,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Grid.Column="3" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8,6">
+                                            <StackPanel>
+                                                <TextBlock Text="DISK FREED" Foreground="{DynamicResource MutedInk}" FontSize="9" FontWeight="Bold"/>
+                                                <TextBlock x:Name="TxtBoostDisk" Text="0 KB" Foreground="#22C55E" FontSize="13" FontWeight="Bold" Margin="0,2,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <!-- Main Content: Scrollable Options + Live Log -->
+                        <Grid Grid.Row="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="270"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Left: Scrollable Boost Option Checkboxes -->
+                            <Border Grid.Column="0" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,8,0">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Text="BOOST OPERATIONS (17 PRO MODULES)" Foreground="{DynamicResource AccentCyan}" FontSize="10" FontWeight="Bold" Margin="2,0,0,6"/>
+                                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,4,0">
+                                        <StackPanel>
+                                            <CheckBox x:Name="ChkBoostRAM"      Content="RAM + Standby List Purge"      Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  Working-set trim + NtSetSystemInfo purge" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostWinTemp"  Content="Windows Temp &amp; Crash Dumps" Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  %TEMP%, Windows\Temp, CrashDumps" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostBrowser"  Content="All Browsers Deep Cache"        Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  Brave, Chrome, Edge, Opera, Firefox (all profiles)" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostGPU"      Content="GPU Shader Caches"              Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  NVIDIA DX/GLCache, AMD DxCache, D3D" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostUWP"      Content="Store / UWP App Temp Caches"    Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  Packages\*\TempState &amp; AC\Temp" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostPrefetch" Content="Prefetch Files"                 Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  C:\Windows\Prefetch (auto-rebuild)" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostDNS"      Content="DNS Resolver Cache"             Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  ipconfig /flushdns (instant)" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostWU"       Content="Windows Update Cache"           Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  SoftwareDistribution\Download only" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostThumb"    Content="Thumbnail Cache"                Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  Explorer thumbcache_*.db files" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostWER"      Content="Windows Error Reports"          Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  WER ReportArchive + ReportQueue" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostDelivOpt" Content="Delivery Optimization Cache"    Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  Windows update delivery cache" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostTRIM"     Content="SSD TRIM Optimization"          Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True"  Margin="0,3"/>
+                                            <TextBlock Text="  Optimize-Volume -ReTrim (SSD only)" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <Border Background="{DynamicResource BorderBrush}" Height="1" Margin="0,6"/>
+
+                                            <CheckBox x:Name="ChkBoostPower"    Content="Turbo High-Performance Plan"    Foreground="{DynamicResource AccentCyan}" FontSize="12" IsChecked="False" Margin="0,3"/>
+                                            <TextBlock Text="  Switch Balanced -> High Performance" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostFont"     Content="Font Cache"                     Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="False" Margin="0,3"/>
+                                            <TextBlock Text="  Stops FontCache svc briefly" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostRecycle"  Content="Empty Recycle Bin"              Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="False" Margin="0,3"/>
+                                            <TextBlock Text="  Permanently delete Recycle Bin" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostDISM"     Content="DISM WinSxS Component Clean"    Foreground="#F59E0B" FontSize="12" IsChecked="False" Margin="0,3"/>
+                                            <TextBlock Text="  Official Windows Update backup trim (20-60s)" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+
+                                            <CheckBox x:Name="ChkBoostEventLogs" Content="Clear Event Logs (Optional)"    Foreground="#F59E0B" FontSize="12" IsChecked="False" Margin="0,3"/>
+                                            <TextBlock Text="  Clears App/System/Security logs" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,4"/>
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </Grid>
+                            </Border>
+
+                            <!-- Right: Live Real-time Log Output -->
+                            <Border Grid.Column="1" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Text="LIVE BOOST ENGINE LOG" Foreground="{DynamicResource AccentCyan}" FontSize="10" FontWeight="Bold" Margin="0,0,0,6"/>
+                                    <TextBox x:Name="TxtBoostLog" Grid.Row="1"
+                                             Background="Transparent"
+                                             Foreground="{DynamicResource PrimaryInk}"
+                                             BorderThickness="0"
+                                             FontFamily="Consolas"
+                                             FontSize="11.5"
+                                             IsReadOnly="True"
+                                             TextWrapping="Wrap"
+                                             AcceptsReturn="True"
+                                             VerticalScrollBarVisibility="Auto"
+                                             HorizontalScrollBarVisibility="Disabled"
+                                             VerticalContentAlignment="Top"
+                                             Text="[Boost Engine] Ready. Select operations and click Analyze or Boost Now.&#x0a;"/>
+                                </Grid>
+                            </Border>
+                        </Grid>
+
+                        <!-- Action Buttons -->
+                        <Grid Grid.Row="3" Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="TxtBoostSafetyNote" Grid.Column="0"
+                                       Text="✓ Safe: Never touches System32, SysWOW64, WinSxS or user documents. Locked files skipped automatically."
+                                       Foreground="{DynamicResource MutedInk}" FontSize="10" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                            <Button x:Name="BtnBoostAnalyze" Grid.Column="1" Content="🔍 Analyze (Dry Run)" Style="{StaticResource BtnSecondary}" Margin="0,0,8,0" Padding="14,8"/>
+                            <Button x:Name="BtnBoostNow" Grid.Column="2" Content="⚡ Boost Now!" Style="{StaticResource BtnPrimary}" Padding="14,8"/>
+                        </Grid>
+                    </Grid>
+
+                    <!-- ============================================================ -->
+                    <!-- VIEW 7: DEV & GAMER BLOAT RADAR                              -->
+                    <!-- ============================================================ -->
+                    <Grid x:Name="ViewBloatRadar" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Header -->
+                        <StackPanel Grid.Row="0" Margin="0,0,0,10">
+                            <TextBlock Text="DEV &amp; GAMER BLOAT RADAR (STALE PROJECTS, DHASH DUPLICATES &amp; SHADER CACHE)" Foreground="{DynamicResource PrimaryInk}" FontSize="13" FontWeight="Bold"/>
+                            <TextBlock Text="Hunt down multi-GB stale node_modules, .dart_tool, .gradle, build folders, Steam/GPU caches, orphaned installers &amp; perceptual duplicate photos."
+                                       Foreground="{DynamicResource MutedInk}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                        </StackPanel>
+
+                        <!-- Scan Controls & Filters -->
+                        <Border Grid.Row="1" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Grid Grid.Row="0" Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="SCAN ROOT (Optional):" Foreground="{DynamicResource SecondaryInk}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox x:Name="TxtRadarRoot" Grid.Column="1" ToolTip="Leave blank to auto-scan Desktop, Downloads, Documents, source, Projects &amp; D:\ drive" Margin="0,0,8,0"/>
+                                    <Button x:Name="BtnRadarBrowse" Grid.Column="2" Content="Browse..." Style="{StaticResource BtnSecondary}" Margin="0,0,10,0"/>
+                                    <TextBlock Grid.Column="3" Text="Stale Days:" Foreground="{DynamicResource SecondaryInk}" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                    <TextBox x:Name="TxtRadarStaleDays" Grid.Column="4" Text="14" Width="46" TextAlignment="Center"/>
+                                </Grid>
+                                <Grid Grid.Row="1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <CheckBox x:Name="ChkRadarDev" Content="Dev Bloat (node_modules/.gradle/build)" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" IsChecked="True" Margin="0,0,14,0"/>
+                                        <CheckBox x:Name="ChkRadarGamer" Content="Gamer &amp; GPU Caches" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" IsChecked="True" Margin="0,0,14,0"/>
+                                        <CheckBox x:Name="ChkRadarInstallers" Content="Orphaned Installers" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" IsChecked="True" Margin="0,0,14,0"/>
+                                        <CheckBox x:Name="ChkRadarDups" Content="Duplicate Media (SHA256 + dHash)" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" IsChecked="True"/>
+                                    </StackPanel>
+                                    <Button x:Name="BtnRunBloatRadar" Grid.Column="1" Content="📡 Launch Bloat Radar Scan" Style="{StaticResource BtnPrimary}" Padding="14,7"/>
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <!-- Radar Status & Selection Bar -->
+                        <Grid Grid.Row="2" Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="TxtRadarStatus" Grid.Column="0" Text="Ready — Click 'Launch Bloat Radar Scan' to detect hidden multi-GB bloat."
+                                       Foreground="{DynamicResource AccentCyan}" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <Button x:Name="BtnRadarSelStale" Grid.Column="1" Content="Select Stale/Safe" Style="{StaticResource BtnSecondary}" Padding="8,4" Margin="0,0,6,0" FontSize="11"/>
+                            <Button x:Name="BtnRadarSelNone" Grid.Column="2" Content="None" Style="{StaticResource BtnSecondary}" Padding="8,4" Margin="0,0,6,0" FontSize="11"/>
+                            <TextBlock x:Name="TxtRadarSelectedSize" Grid.Column="3" Text="Selected: 0 KB" Foreground="#22C55E" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                        </Grid>
+
+                        <!-- Results DataGrid -->
+                        <DataGrid x:Name="GridBloatRadar" Grid.Row="3" AutoGenerateColumns="False" HeadersVisibility="Column"
+                                  Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" GridLinesVisibility="Horizontal" RowHeight="28">
+                            <DataGrid.Columns>
+                                <DataGridCheckBoxColumn Header="✓" Binding="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="34"/>
+                                <DataGridTextColumn Header="CATEGORY" Binding="{Binding Category}" Width="165" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="STATUS / AGE" Binding="{Binding StatusTag}" Width="135" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="SIZE" Binding="{Binding SizeDisplay}" Width="90" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="TARGET PATH" Binding="{Binding TargetPath}" Width="*" IsReadOnly="True"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <!-- Footer Action -->
+                        <Grid Grid.Row="4" Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="✓ Safe Guard: Active projects (&lt; Stale Days) &amp; visual near-duplicates (dHash) are left unchecked by default for your review."
+                                       Foreground="{DynamicResource MutedInk}" FontSize="10.5" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                            <Button x:Name="BtnCleanBloatRadar" Grid.Column="1" Content="🧹 Clean Selected Bloat Items" Style="{StaticResource BtnDanger}" Padding="16,8"/>
+                        </Grid>
+                    </Grid>
+
+                    <!-- ============================================================ -->
+                    <!-- VIEW 8: AUTO-SORT WATCHDOG                                   -->
+                    <!-- ============================================================ -->
+                    <Grid x:Name="ViewWatchdog" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Header -->
+                        <StackPanel Grid.Row="0" Margin="0,0,0,10">
+                            <TextBlock Text="AUTO-SORT WATCHDOG (REAL-TIME DESKTOP &amp; DOWNLOADS ORGANIZER)" Foreground="{DynamicResource PrimaryInk}" FontSize="13" FontWeight="Bold"/>
+                            <TextBlock Text="Automatically categorizes messy Desktop &amp; Downloads files into clean Sorted\ subfolders (Installers, Archives, Images, Videos, Documents, Code_Scripts) in real time."
+                                       Foreground="{DynamicResource MutedInk}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                        </StackPanel>
+
+                        <!-- Watchdog Status & Controls Card -->
+                        <Border Grid.Row="1" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,0,0,10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                        <TextBlock Text="WATCHDOG STATUS: " Foreground="{DynamicResource MutedInk}" FontSize="11" FontWeight="Bold" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtWatchdogState" Text="STOPPED" Foreground="#F59E0B" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                                        <TextBlock x:Name="TxtWatchdogMoved" Text="Files Sorted: 0" Foreground="{DynamicResource AccentCyan}" FontSize="11.5" FontWeight="Bold" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <CheckBox x:Name="ChkWatchDownloads" Content="Watch Downloads Folder" Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="True" Margin="0,0,16,0"/>
+                                        <CheckBox x:Name="ChkWatchDesktop" Content="Watch Desktop Folder (Skips .lnk shortcuts)" Foreground="{DynamicResource PrimaryInk}" FontSize="12" IsChecked="False"/>
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <Button x:Name="BtnWatchdogSortNow" Grid.Column="1" Content="📂 Sort Existing Files Now" Style="{StaticResource BtnSecondary}" Margin="0,0,8,0" Padding="14,8"/>
+                                <Button x:Name="BtnWatchdogToggle" Grid.Column="2" Content="▶ Start Real-Time Watchdog" Style="{StaticResource BtnPrimary}" Padding="14,8"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- Category Rules + Live Activity Log -->
+                        <Grid Grid.Row="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="290"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Left: Category Mapping Card -->
+                            <Border Grid.Column="0" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,8,0">
+                                <StackPanel>
+                                    <TextBlock Text="AUTO-SORT CATEGORY RULES" Foreground="{DynamicResource AccentCyan}" FontSize="10" FontWeight="Bold" Margin="0,0,0,8"/>
+                                    <TextBlock Text="• Sorted\Installers" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" FontWeight="SemiBold"/>
+                                    <TextBlock Text="  .exe, .msi, .msix, .appx, .iso, .bat" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,6"/>
+
+                                    <TextBlock Text="• Sorted\Archives" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" FontWeight="SemiBold"/>
+                                    <TextBlock Text="  .zip, .rar, .7z, .tar, .gz, .xz" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,6"/>
+
+                                    <TextBlock Text="• Sorted\Images" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" FontWeight="SemiBold"/>
+                                    <TextBlock Text="  .png, .jpg, .jpeg, .webp, .gif, .svg" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,6"/>
+
+                                    <TextBlock Text="• Sorted\Videos &amp; Audio" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" FontWeight="SemiBold"/>
+                                    <TextBlock Text="  .mp4, .mkv, .mov, .mp3, .wav, .flac" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,6"/>
+
+                                    <TextBlock Text="• Sorted\Documents" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" FontWeight="SemiBold"/>
+                                    <TextBlock Text="  .pdf, .docx, .xlsx, .pptx, .txt, .csv" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,6"/>
+
+                                    <TextBlock Text="• Sorted\Code_Scripts" Foreground="{DynamicResource PrimaryInk}" FontSize="11.5" FontWeight="SemiBold"/>
+                                    <TextBlock Text="  .ps1, .py, .js, .ts, .dart, .json, .sql" Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,0,0,6"/>
+
+                                    <Border Background="{DynamicResource BorderBrush}" Height="1" Margin="0,6"/>
+                                    <TextBlock Text="✓ Safely ignores .lnk shortcuts, folders, and active downloads (.crdownload / .part / .tmp)." Foreground="#22C55E" FontSize="10" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Right: Live Watchdog Log -->
+                            <Border Grid.Column="1" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Text="LIVE WATCHDOG ACTIVITY LOG" Foreground="{DynamicResource AccentCyan}" FontSize="10" FontWeight="Bold" Margin="0,0,0,6"/>
+                                    <TextBox x:Name="TxtWatchdogLog" Grid.Row="1"
+                                             Background="Transparent"
+                                             Foreground="{DynamicResource PrimaryInk}"
+                                             BorderThickness="0"
+                                             FontFamily="Consolas"
+                                             FontSize="11.5"
+                                             IsReadOnly="True"
+                                             TextWrapping="Wrap"
+                                             AcceptsReturn="True"
+                                             VerticalScrollBarVisibility="Auto"
+                                             HorizontalScrollBarVisibility="Disabled"
+                                             VerticalContentAlignment="Top"
+                                             Text="[Watchdog] Ready. Click 'Sort Existing Files Now' or 'Start Real-Time Watchdog'.&#x0a;"/>
+                                </Grid>
+                            </Border>
+                        </Grid>
+
+                        <TextBlock Grid.Row="3" Text="✓ Collision-Safe: Existing files are never overwritten — duplicates are auto-renamed (e.g. file (1).pdf)."
+                                   Foreground="{DynamicResource MutedInk}" FontSize="10" Margin="0,8,0,0"/>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- ============================================================ -->
+            <!-- RIGHT PANE (ALT): PC SPEED BOOST TELEMETRY & STARTUP MANAGER -->
+            <!-- ============================================================ -->
+            <Border x:Name="PaneRightBoostIntel" Grid.Column="2" Visibility="Collapsed" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Header -->
+                    <StackPanel Grid.Row="0" Margin="0,0,0,8">
+                        <TextBlock Text="PERFORMANCE COMMAND CENTER" Foreground="{DynamicResource PrimaryInk}" FontSize="12" FontWeight="Bold"/>
+                        <TextBlock Text="Live RAM consumers, power profile &amp; startup boot accelerator" Foreground="{DynamicResource MutedInk}" FontSize="10"/>
+                    </StackPanel>
+
+                    <!-- Quick Presets -->
+                    <Border Grid.Row="1" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,0,0,8">
+                        <StackPanel>
+                            <TextBlock Text="QUICK OPTIMIZATION PRESETS" Foreground="{DynamicResource AccentCyan}" FontSize="9" FontWeight="Bold" Margin="0,0,0,6"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Button x:Name="BtnPresetSafe" Grid.Column="0" Content="✓ Safe" Style="{StaticResource BtnSecondary}" Margin="0,0,4,0" Padding="6,5" FontSize="11"/>
+                                <Button x:Name="BtnPresetGaming" Grid.Column="1" Content="⚡ Gaming" Style="{StaticResource BtnSecondary}" Margin="0,0,4,0" Padding="6,5" FontSize="11"/>
+                                <Button x:Name="BtnPresetMax" Grid.Column="2" Content="🔥 Max Clean" Style="{StaticResource BtnSecondary}" Padding="6,5" FontSize="11"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Active Power Plan Card -->
+                    <Border Grid.Row="2" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,0,0,8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="ACTIVE WINDOWS POWER PLAN" Foreground="{DynamicResource MutedInk}" FontSize="9" FontWeight="Bold"/>
+                                <TextBlock x:Name="TxtBoostPowerPlan" Text="Balanced" Foreground="{DynamicResource PrimaryInk}" FontSize="12" FontWeight="Bold" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <Button x:Name="BtnBoostTogglePower" Grid.Column="1" Content="⚡ High Perf" Style="{StaticResource BtnPrimary}" Padding="10,5" FontSize="11"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Top Memory Consumers -->
+                    <Border Grid.Row="3" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,0,0,8">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0" Margin="0,0,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="TOP RAM CONSUMERS (LIVE)" Foreground="{DynamicResource AccentCyan}" FontSize="9" FontWeight="Bold" VerticalAlignment="Center"/>
+                                <Button x:Name="BtnBoostRefreshProcs" Grid.Column="1" Content="↻ Refresh" Style="{StaticResource BtnSecondary}" Padding="6,2" FontSize="10"/>
+                            </Grid>
+                            <DataGrid x:Name="GridBoostTopProcs" Grid.Row="1" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column"
+                                      Background="Transparent" BorderThickness="0" GridLinesVisibility="Horizontal" RowHeight="24">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="PROCESS" Binding="{Binding Name}" Width="*"/>
+                                    <DataGridTextColumn Header="RAM" Binding="{Binding MemDisplay}" Width="70"/>
+                                    <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="55"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </Border>
+
+                    <!-- Startup Boot Accelerator -->
+                    <Border Grid.Row="4" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,0,0,8">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0" Margin="0,0,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="STARTUP BOOT ACCELERATOR" Foreground="{DynamicResource AccentCyan}" FontSize="9" FontWeight="Bold" VerticalAlignment="Center"/>
+                                <Button x:Name="BtnBoostScanStartup" Grid.Column="1" Content="Scan Startup" Style="{StaticResource BtnSecondary}" Padding="6,2" FontSize="10"/>
+                            </Grid>
+                            <DataGrid x:Name="GridBoostStartup" Grid.Row="1" AutoGenerateColumns="False" HeadersVisibility="Column"
+                                      Background="Transparent" BorderThickness="0" GridLinesVisibility="Horizontal" RowHeight="24">
+                                <DataGrid.Columns>
+                                    <DataGridCheckBoxColumn Header="✓" Binding="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="28"/>
+                                    <DataGridTextColumn Header="STARTUP APP" Binding="{Binding Name}" Width="*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="SCOPE" Binding="{Binding Scope}" Width="55" IsReadOnly="True"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </Border>
+
+                    <!-- Startup Action Footer -->
+                    <Button x:Name="BtnBoostDisableStartup" Grid.Row="5" Content="Disable Selected Startup Entries (Auto-Backup)" Style="{StaticResource BtnDanger}" Padding="10,7" FontSize="11"/>
+                </Grid>
+            </Border>
+
+            <!-- ============================================================ -->
+            <!-- RIGHT PANE: DEEP-SCAN LEFTOVER INSPECTOR & NUKE ENGINE       -->
+            <!-- ============================================================ -->
+            <Border x:Name="PaneRightInspector" Grid.Column="2" Visibility="Collapsed" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Inspector Header -->
+                    <Grid Grid.Row="0" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="ZERO-TRACE LEFTOVER INSPECTOR" Foreground="{DynamicResource PrimaryInk}" FontSize="13" FontWeight="Bold"/>
+                            <TextBlock x:Name="LblInspectorTarget" Text="Target: Awaiting Scan..." Foreground="{DynamicResource AccentCyan}" FontSize="11" FontWeight="SemiBold"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button x:Name="BtnSelectAllLeftovers" Content="All" Style="{StaticResource BtnSecondary}" Padding="8,4" FontSize="11" Margin="0,0,4,0"/>
+                            <Button x:Name="BtnSelectNoneLeftovers" Content="None" Style="{StaticResource BtnSecondary}" Padding="8,4" Margin="0,0,4,0" FontSize="11"/>
+                            <Button x:Name="BtnHideInspector" Content="✕" ToolTip="Hide Leftover Inspector" Style="{StaticResource BtnSecondary}" Padding="8,4" FontSize="11"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Breakdown Summary Pills -->
+                    <Border Grid.Row="1" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,0,8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="LblStatFiles" Grid.Column="0" Text="FS: 0 folders/files" Foreground="{DynamicResource SecondaryInk}" FontFamily="Consolas" FontSize="11"/>
+                            <TextBlock x:Name="LblStatReg" Grid.Column="1" Text="REG: 0 keys/vals" Foreground="{DynamicResource SecondaryInk}" FontFamily="Consolas" FontSize="11"/>
+                            <TextBlock x:Name="LblStatSvc" Grid.Column="2" Text="SVC/TASK: 0" Foreground="{DynamicResource SecondaryInk}" FontFamily="Consolas" FontSize="11"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Leftovers Checkable DataGrid -->
+                    <DataGrid x:Name="GridLeftovers" Grid.Row="2" CanUserAddRows="False">
+                        <DataGrid.Columns>
+                            <DataGridCheckBoxColumn Header="✓" Binding="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="32"/>
+                            <DataGridTextColumn Header="TYPE" Binding="{Binding ItemType}" Width="78" IsReadOnly="True"/>
+                            <DataGridTextColumn Header="LOCATION" Binding="{Binding Category}" Width="115" IsReadOnly="True"/>
+                            <DataGridTextColumn Header="SIZE" Binding="{Binding SizeFormatted}" Width="68" IsReadOnly="True"/>
+                            <DataGridTextColumn Header="PATH / REGISTRY KEY" Binding="{Binding DisplayPath}" Width="350" IsReadOnly="True"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <!-- Live Execution Log Box -->
+                    <Border Grid.Row="3" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Height="115" Margin="0,8,0,8" Padding="6">
+                        <TextBox x:Name="TxtExecutionLog" Background="Transparent" Foreground="{DynamicResource SecondaryInk}" BorderThickness="0"
+                                 FontFamily="Consolas" FontSize="11" IsReadOnly="True" TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
+                    </Border>
+
+                    <!-- Primary Nuke CTA Button -->
+                    <Button x:Name="BtnNukeSelected" Grid.Row="4" Content="100% WIPE &amp; NUKE SELECTED LEFTOVERS (0 ITEMS)"
+                            Style="{StaticResource BtnDanger}" Padding="14,10" FontSize="12.5"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ================================================================ -->
+        <!-- ROW 3: BOTTOM STATUS TELEMETRY BAR                               -->
+        <!-- ================================================================ -->
+        <Border Grid.Row="3" Background="{DynamicResource RecessedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="LblStatusBar" Grid.Column="0" Text="NovaGen Engine Ready. All 18 deep-scan sensors online."
+                           Foreground="{DynamicResource SecondaryInk}" FontFamily="Consolas" FontSize="11.5" VerticalAlignment="Center"/>
+                <TextBlock x:Name="LblBackupPathInfo" Grid.Column="1" Text="Backups: d:\uinsitaler\Backups"
+                           Foreground="{DynamicResource MutedInk}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center"/>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
